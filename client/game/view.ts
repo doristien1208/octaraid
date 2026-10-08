@@ -3,7 +3,8 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RULES, TICK_MS, TICK_RATE } from '../../shared/constants';
 import { encounterById, type Encounter } from '../../shared/encounters';
 import { LB_SLOT, LIMIT_BREAKS, jobById, type Fx, type Job, type SkillInfo } from '../../shared/jobs';
-import { DENY_TEXT, type C2S, type DenyReason, type FightEvent, type GameResult, type GameStartInfo, type SnapPlayer, type Snapshot } from '../../shared/protocol';
+import { FOES } from '../../shared/bosses/foes';
+import { DENY_TEXT, type C2S, type DenyReason, type FightEvent, type GameResult, type GameStartInfo, type SnapFoe, type SnapPlayer, type Snapshot } from '../../shared/protocol';
 import { angleDiff, clampToArena, faceTowards, reach } from '../../shared/sim/arena';
 import { STATUS_IDS } from '../../shared/status';
 import type { Audio } from '../audio';
@@ -13,11 +14,12 @@ import { AUTO_HEAL_KEY, loadQuality, pixelRatioFor, settingsModal } from '../ui/
 import { buildArena, type ArenaView } from './arena';
 import { loadModels, loadedModels } from './assets';
 import { Avatar } from './avatar';
+import { makeFoe, type FoeView } from './bosses';
 import { CameraRig } from './camera';
 import { Effects } from './effects';
 import { Hud, type SlotState } from './hud';
-import { Dummy } from './models';
 import { Playback } from './playback';
+import { Telegraphs } from './telegraphs';
 
 /** Where the view sends its messages: the server, or the in-browser fight of the practice mode. */
 export interface GameLink {
@@ -26,6 +28,7 @@ export interface GameLink {
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
+const hittable = (e: SnapFoe) => e.hp > 0 && !e.u && !e.g;
 
 /** Effect colours per job: projectiles, slashes, rings. */
 const JOB_FX: Readonly<Record<string, { color: string; shot?: 'orb' | 'arrow' }>> = {
@@ -54,7 +57,9 @@ export class GameView {
   private readonly rig: CameraRig;
   private readonly hud: Hud;
   private readonly arena: ArenaView;
-  private readonly dummy: Dummy;
+  /** every enemy on screen by id: the boss, its adds, a prison */
+  private readonly foes = new Map<string, { view: FoeView; kind: SnapFoe['kd'] }>();
+  private readonly teles = new Telegraphs();
   private readonly effects = new Effects();
   private readonly enc: Encounter;
   private readonly myJob: Job;
@@ -119,12 +124,10 @@ export class GameView {
 
     this.arena = buildArena(this.enc);
     this.scene.add(this.arena.group);
-    const foe = info.foes[0];
-    this.dummy = new Dummy(foe?.name ?? '木人', foe?.r ?? 2.4);
-    this.scene.add(this.dummy.root);
+    for (const f of info.foes) this.addFoe(f.id, f.kind);
+    this.scene.add(this.teles.group);
     this.scene.add(this.effects.group);
     for (const p of info.players) this.names.set(p.id, p.name);
-    for (const f of info.foes) this.names.set(f.id, f.name);
     this.buildAvatars();
     // the KayKit models normally arrive while the room is waiting; if not, swap them in when they do
     if (!loadedModels())
@@ -160,6 +163,33 @@ export class GameView {
     if (this.focusAt) this.avatars.get(this.meId)?.hideMarker();
   }
 
+  private addFoe(id: string, kind: SnapFoe['kd']): void {
+    if (this.foes.has(id)) return;
+    const view = makeFoe(kind);
+    this.foes.set(id, { view, kind });
+    this.names.set(id, FOES[kind].name);
+    this.scene.add(view.root);
+  }
+
+  /** Enemies come (adds, a prison) and go (gone from the snapshot after they sank away). */
+  private syncFoes(s: Snapshot): void {
+    for (const e of s.e) {
+      if (!this.foes.has(e.i)) {
+        this.addFoe(e.i, e.kd);
+        if (s.ph === 1) this.effects.burst(e.x, 0.6, e.z, FOES[e.kd].ring + 0.6, e.kd === 'prison' ? '#e8c48a' : '#c8b49a', 0.5);
+      }
+      const f = this.foes.get(e.i)!;
+      f.view.setState(e.u === 1, e.g === 1);
+      f.view.setCasting(e.c ? e.c[0] : null);
+    }
+    for (const [id, f] of this.foes) {
+      if (s.e.some((e) => e.i === id)) continue;
+      this.scene.remove(f.view.root);
+      f.view.dispose();
+      this.foes.delete(id);
+    }
+  }
+
   // ------------------------------------------------------------- from the server
 
   onSnap(s: Snapshot): void {
@@ -183,6 +213,8 @@ export class GameView {
         if (this.dead) this.held.clear();
       }
     }
+    this.syncFoes(s);
+    this.teles.update(s.tg, (id) => this.drawnAt(id), performance.now());
     for (const e of s.ev ?? []) this.onEvent(e, s);
     const count = this.hud.onSnap(s, this.target, this.slotStates(s));
     if (count !== this.lastCount) {
@@ -196,8 +228,8 @@ export class GameView {
     this.effects.setZones(
       (s.zn ?? []).map((z) => ({ key: `${z.o}/${z.s}`, x: z.x, z: z.z, r: z.r, color: STATUS_IDS[z.s] === 'ley' ? '#ff6a3a' : '#9a8cff' })),
     );
-    // a target that is gone (a dead enemy) is dropped
-    if (this.target && s.e.some((e) => e.i === this.target && e.hp <= 0)) this.pick(null);
+    // a target that is gone (a dead enemy, a boss between phases) is dropped
+    if (this.isFoe(this.target) && !s.e.some((e) => e.i === this.target && hittable(e))) this.pick(null);
     if (s.ph === 2) this.over = true;
   }
 
@@ -250,7 +282,8 @@ export class GameView {
     this.resize.disconnect();
     this.rig.dispose();
     this.arena.dispose();
-    this.dummy.dispose();
+    for (const f of this.foes.values()) f.view.dispose();
+    this.teles.dispose();
     this.effects.dispose();
     for (const a of this.avatars.values()) a.dispose();
     this.renderer.dispose();
@@ -264,12 +297,26 @@ export class GameView {
     if (id === this.meId && this.me) return { x: this.me.x, y: 1.1, z: this.me.z };
     const a = this.avatars.get(id);
     if (a) return { x: a.root.position.x, y: 1.1, z: a.root.position.z };
-    if (id === this.info.foes[0]?.id) return { x: this.dummy.root.position.x, y: 2, z: this.dummy.root.position.z };
+    const f = this.foes.get(id);
+    if (f) return { x: f.view.root.position.x, y: FOES[f.kind].boss ? 2.6 : 1.4, z: f.view.root.position.z };
     return { x: 0, y: 1, z: 0 };
   }
 
+  /** Where a player is drawn this frame (null when they are not on screen). */
+  private drawnAt(id: string): { x: number; z: number } | null {
+    if (id === this.meId && this.me) return this.me;
+    const a = this.avatars.get(id);
+    return a?.root.visible ? { x: a.root.position.x, z: a.root.position.z } : null;
+  }
+
   private isFoe(id: string | null | undefined): boolean {
-    return !!id && this.info.foes.some((f) => f.id === id);
+    return !!id && (this.foes.has(id) || this.info.foes.some((f) => f.id === id));
+  }
+
+  /** My character cannot move: a stun (岩牢) or a prison. */
+  private stunned(): boolean {
+    const mine = this.last?.p.find((p) => p.i === this.meId);
+    return !!mine?.st?.some((x) => STATUS_IDS[x[0]] === 'stun');
   }
 
   private jobOf(id: string): Job | null {
@@ -303,7 +350,8 @@ export class GameView {
         this.avatars.get(e.i)?.setDead(true);
         if (e.i === this.meId) {
           this.audio.play('die');
-          this.hud.announce('你倒下了：等待補師復活', 'bad');
+          // falling has its own line (the fell event comes first)
+          if (!s.ev?.some((x) => x.k === 'fell' && x.i === e.i)) this.hud.announce('你倒下了：等待補師復活', 'bad');
         }
         const name = this.names.get(e.i);
         if (name) this.hud.addChat('', `${name} 倒地`);
@@ -321,31 +369,92 @@ export class GameView {
       case 'lb':
         return this.onLimitBreak(e.i, e.r, s);
       case 'bcast': {
-        this.dummy.setCasting(true);
+        this.hud.castKind(e.i, e.m);
         this.audio.play('warn');
-        if (e.m === 'buster' && e.t) {
+        // the boss scripts mark their busters with a telegraph; the training dummy has none
+        if (e.m === 'buster' && e.t && this.foes.get(e.i)?.kind === 'dummy') {
           const t = e.t;
           this.effects.mark(() => this.where(t), '#ff3b3b', e.d / TICK_RATE);
         }
+        if (e.m === 'enrage') this.hud.announce(`${e.n}：快打倒它！`, 'bad');
         return;
       }
-      case 'boss': {
-        this.dummy.setCasting(false);
-        if (e.m === 'auto' && e.t) {
+      case 'boss':
+        return this.onBossMove(e);
+      case 'phase': {
+        // the first phase starts with the fight: no banner for it
+        if (s.el > TICK_RATE) this.hud.announce(e.u ? `${e.n}：先打倒小怪` : e.n, 'phase');
+        if (e.u) this.audio.play('warn');
+        return;
+      }
+      case 'fail': {
+        const at = this.where(e.i);
+        this.effects.text(at.x, 2.9, at.z, `失誤：${e.n}`, 'fail');
+        if (e.i === this.meId) this.audio.play('deny');
+        return;
+      }
+      case 'clean':
+        this.hud.flashLb(`${e.n} 零失誤：極限技 +${RULES.lbClean}%`);
+        return;
+      case 'kb': {
+        const at = this.where(e.i);
+        this.effects.burst(at.x, 0.4, at.z, 1.2, '#ffffff', 0.3);
+        return;
+      }
+      case 'fell': {
+        const name = this.names.get(e.i);
+        if (name) this.hud.addChat('', `${name} 掉下懸崖`);
+        if (e.i === this.meId) this.hud.announce('掉下懸崖了：等待補師復活', 'bad');
+        return;
+      }
+      case 'spawn':
+        return;
+    }
+  }
+
+  /** An enemy move went off. */
+  private onBossMove(e: Extract<FightEvent, { k: 'boss' }>): void {
+    const f = this.foes.get(e.i);
+    const b = f?.view.root.position ?? new THREE.Vector3();
+    switch (e.m) {
+      case 'auto':
+        if (e.t) {
           const at = this.where(e.t);
-          this.effects.slash(at.x, 1.2, at.z, faceTowards(this.dummy.root.position.x, this.dummy.root.position.z, at.x, at.z), '#ff8a6a');
-        } else if (e.m === 'buster' && e.t) {
+          this.effects.slash(at.x, 1.2, at.z, faceTowards(b.x, b.z, at.x, at.z), '#ff8a6a');
+        }
+        break;
+      case 'buster':
+        if (e.t) {
           const at = this.where(e.t);
           this.effects.burst(at.x, 1.2, at.z, 1.6, '#ff3b3b', 0.45);
           this.avatars.get(e.t)?.hurt();
-        } else if (e.m === 'raidwide') {
-          const b = this.dummy.root.position;
-          this.effects.wave(b.x, b.z, this.enc.arena.size * 1.3, '#ffb03b', 0.9);
         }
-        if (e.m !== 'auto' && (e.t === this.meId || e.m === 'raidwide')) this.audio.play('hurt');
-        return;
-      }
+        break;
+      case 'raidwide':
+        this.effects.wave(b.x, b.z, f && !FOES[f.kind].boss ? this.enc.arena.size * 2 : this.enc.arena.size * 1.3, f && !FOES[f.kind].boss ? '#ff5a3a' : '#ffb03b', 0.9);
+        break;
+      case 'jump':
+        f?.view.act('jump');
+        this.effects.wave(b.x, b.z, 14, '#c8b49a', 1.2);
+        break;
+      case 'prison':
+        if (e.t) {
+          const at = this.where(e.t);
+          this.effects.burst(at.x, 0.8, at.z, 1.8, '#e8c48a', 0.5);
+          const name = this.names.get(e.t);
+          if (e.t === this.meId) this.hud.announce('被困在岩牢裡：等隊友打破', 'bad');
+          else if (name) this.hud.addChat('', `${name} 被困在岩牢裡：快打破它`);
+        }
+        break;
+      case 'adds':
+        this.hud.addChat('', '岩巨兵出現了');
+        break;
+      case 'revive':
+        this.effects.pillar(b.x, b.z, '#ff7a2c', 1.2, 0.8);
+        this.hud.addChat('', '岩巨兵又站起來了：要一起打倒');
+        break;
     }
+    if (e.m !== 'auto' && e.m !== 'jump' && e.m !== 'adds' && (e.t === this.meId || e.m === 'raidwide')) this.audio.play('hurt');
   }
 
   /** A skill went off: the caster's animation and the shape of what it did. */
@@ -405,7 +514,7 @@ export class GameView {
     const at = this.where(e.t);
     if (this.isFoe(e.t)) {
       if (e.s) this.hud.addDealt(e.s, e.a);
-      if (!e.dot) this.dummy.hit();
+      if (!e.dot) this.foes.get(e.t)?.view.hit();
       if (e.s === this.meId) {
         this.effects.text(at.x, 3.2, at.z, `${e.a.toLocaleString()}${e.c ? '!' : ''}`, `dealt ${e.c ? 'crit' : ''} ${e.dot ? 'small' : ''}`);
         if (e.pos !== undefined) this.effects.text(at.x, 3.9, at.z, e.pos ? '身位成功' : '身位失敗', e.pos ? 'pos' : 'pos miss');
@@ -435,7 +544,7 @@ export class GameView {
   /** Selects an enemy or a party member (null clears it). */
   private pick(id: string | null): void {
     this.target = id;
-    this.dummy.setTargeted(this.isFoe(id));
+    for (const [fid, f] of this.foes) f.view.setTargeted(fid === id);
     for (const [pid, a] of this.avatars) a.setPicked(pid === id ? 'ally' : null);
   }
 
@@ -443,7 +552,11 @@ export class GameView {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const v = new THREE.Vector2(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(v, this.camera);
-    const boxes: [THREE.Object3D, string][] = [[this.dummy.hitbox, this.info.foes[0]?.id ?? 'boss']];
+    const boxes: [THREE.Object3D, string][] = [];
+    for (const e of this.last?.e ?? []) {
+      const f = this.foes.get(e.i);
+      if (f && hittable(e)) boxes.push([f.view.hitbox, e.i]);
+    }
     for (const [id, a] of this.avatars) if (a.root.visible) boxes.push([a.hitbox, id]);
     const hits = this.raycaster.intersectObjects(boxes.map((b) => b[0]), false);
     const first = hits[0];
@@ -452,19 +565,23 @@ export class GameView {
     if (id) this.pick(id);
   }
 
-  /** The nearest living enemy (there is only the dummy for now). */
+  /** The enemies that can be attacked, nearest first. */
+  private foesByDistance(s: Snapshot): SnapFoe[] {
+    const me = this.me;
+    const d = (e: SnapFoe) => (me ? Math.hypot(e.x - me.x, e.z - me.z) - FOES[e.kd].ring : 0);
+    return s.e.filter(hittable).sort((a, b) => d(a) - d(b));
+  }
+
   private nearestFoe(s: Snapshot): string | null {
-    let best: string | null = null;
-    let bestD = Infinity;
-    for (const e of s.e) {
-      if (e.hp <= 0) continue;
-      const d = this.me ? Math.hypot(e.x - this.me.x, e.z - this.me.z) : 0;
-      if (d < bestD) {
-        best = e.i;
-        bestD = d;
-      }
-    }
-    return best;
+    return this.foesByDistance(s)[0]?.i ?? null;
+  }
+
+  /** Tab: the next enemy, nearest first, round again after the last. */
+  private cycleFoe(s: Snapshot): string | null {
+    const list = this.foesByDistance(s);
+    if (!list.length) return null;
+    const k = list.findIndex((e) => e.i === this.target);
+    return list[(k + 1) % list.length]!.i;
   }
 
   /** For the hotbar: is there something in range for each skill. */
@@ -477,7 +594,7 @@ export class GameView {
         const id = this.isFoe(this.target) ? this.target : this.nearestFoe(s);
         const e = s.e.find((x) => x.i === id);
         if (!e) return 'target';
-        return reach(me.x, me.z, { x: e.x, z: e.z, r: this.info.foes.find((f) => f.id === e.i)?.r ?? 0 }) > sk.range ? 'range' : 'ok';
+        return reach(me.x, me.z, { x: e.x, z: e.z, r: FOES[e.kd].ring }) > sk.range ? 'range' : 'ok';
       }
       if (sk.target === 'dead') {
         const any = s.p.some((p) => p.d === 1 && reach(me.x, me.z, { x: p.x, z: p.z, r: RULES.playerRadius }) <= sk.range);
@@ -503,7 +620,7 @@ export class GameView {
     }
     if (e.code === 'Tab') {
       e.preventDefault();
-      if (this.last) this.pick(this.nearestFoe(this.last));
+      if (this.last) this.pick(this.cycleFoe(this.last));
       return;
     }
     const fkey = /^F([1-8])$/.exec(e.code);
@@ -649,10 +766,14 @@ export class GameView {
       );
       av.setOffline(p1.dc === 1);
     }
-    const ea = a?.e[0];
-    const eb = b?.e[0];
-    if (ea && eb) this.dummy.update(ea.x + (eb.x - ea.x) * k, ea.z + (eb.z - ea.z) * k, ea.f + angleDiff(ea.f, eb.f) * k, dt, time);
-    else this.dummy.update(0, 0, 0, dt, time);
+    for (const [id, f] of this.foes) {
+      const ea = a?.e.find((e) => e.i === id);
+      const eb = b?.e.find((e) => e.i === id);
+      const e0 = ea ?? eb ?? this.last?.e.find((e) => e.i === id);
+      const e1 = eb ?? e0;
+      if (e0 && e1) f.view.update(e0.x + (e1.x - e0.x) * k, e0.z + (e1.z - e0.z) * k, e0.f + angleDiff(e0.f, e1.f) * k, dt, time);
+    }
+    this.teles.update(null, (id) => this.drawnAt(id), now);
     this.effects.update(dt, time);
 
     const focus = this.focusAt ?? this.me ?? { x: 0, z: this.enc.arena.size * 0.55 };
@@ -697,7 +818,7 @@ export class GameView {
   private moveMe(dt: number, now: number): void {
     const me = this.me;
     if (!me) return;
-    if (this.carried || this.dead) {
+    if (this.carried || this.dead || this.stunned()) {
       me.moving = false;
       return;
     }

@@ -34,8 +34,9 @@ export function partyNotes(jobs: readonly JobId[]): string[] {
   if (!jobs.length) return [];
   const n = roleCounts(jobs);
   const notes: string[] = [];
-  if (!n.tank) notes.push('沒有坦克：仇恨第一的人承受普攻與死刑，傷害只打 50%');
+  if (!n.tank) notes.push('沒有坦克：仇恨第一的人承受普攻與死刑，傷害只打 50%，連續死刑只打一下');
   if (!n.healer) notes.push('沒有補師：全隊每秒回復 1.5% HP，倒地 20 秒後自動復活（每人每場 1 次）');
   if (n.tank === 1) notes.push('只有 1 個坦克：換坦機制的易傷會在下一次死刑前結束');
+  if (!n.tank || !n.healer) notes.push('Hard 以 1 坦 1 補為前提：少了坦克或補師很難通關');
   return notes;
 }

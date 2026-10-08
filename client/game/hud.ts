@@ -1,7 +1,8 @@
+import { FOES } from '../../shared/bosses/foes';
 import { RULES, TICK_RATE } from '../../shared/constants';
 import { clock, difficultyName, encounterById } from '../../shared/encounters';
 import { LB_SLOT, LIMIT_BREAKS, jobById, type Job } from '../../shared/jobs';
-import { END_NAMES, type GameResult, type GameStartInfo, type SnapStatus, type Snapshot } from '../../shared/protocol';
+import { END_NAMES, type FightEvent, type GameResult, type GameStartInfo, type SnapStatus, type Snapshot } from '../../shared/protocol';
 import { STATUS, STATUS_IDS } from '../../shared/status';
 import { h, isSubmitKey } from '../dom';
 import { SKILL_ACTIONS, keysText, type Bindings } from '../keys';
@@ -76,6 +77,12 @@ export class Hud {
   private readonly bossHp = h('i');
   private readonly bossHpText = h('span');
   private readonly bossCast = h('div', { class: 'cast-bar boss' });
+  private readonly bossBox: HTMLElement;
+  private readonly bossName = h('span');
+  /** what kind of move each enemy is casting (from the cast events): the cast bar's colour */
+  private readonly castKinds = new Map<string, Extract<FightEvent, { k: 'bcast' }>['m']>();
+  private readonly lbFlash = h('div', { class: 'lb-flash' });
+  private lbFlashTimer = 0;
   private readonly target = h('div', { class: 'hud-target' });
   private readonly myStatus = h('div', { class: 'hud-status' });
   private readonly myHp = h('i');
@@ -145,19 +152,28 @@ export class Hud {
       h('div', { class: 'bar lb' }, this.lbBar, this.lbPct),
       lb ? h('span', { class: 'lb-name' }, lb.name) : null,
       this.lbKey,
+      this.lbFlash,
+    );
+    const boss = info.foes.find((f) => FOES[f.kind].boss) ?? info.foes[0];
+    this.bossName.textContent = boss?.name ?? enc.boss;
+    const note = info.echo
+      ? `超越之力 +${info.echo * 10}%`
+      : boss?.kind === 'dummy'
+        ? '練習用木人：會普攻、死刑與全場 AoE'
+        : '';
+    this.bossBox = h(
+      'div',
+      { class: 'hud-boss' },
+      h('div', { class: 'boss-name' }, this.bossName, h('span', { class: `diff ${info.hard ? 'hard' : ''}` }, `${enc.name === this.bossName.textContent ? '' : `${enc.name} `}${difficultyName(info.hard)}`)),
+      h('div', { class: 'bar boss-hp' }, this.bossHp, this.bossHpText),
+      this.bossCast,
+      note ? h('div', { class: 'boss-note' }, note) : null,
     );
 
     this.el = h(
       'div',
       { class: 'hud' },
-      h(
-        'div',
-        { class: 'hud-boss' },
-        h('div', { class: 'boss-name' }, info.foes[0]?.name ?? enc.boss, h('span', { class: `diff ${info.hard ? 'hard' : ''}` }, `${enc.name} ${difficultyName(info.hard)}`)),
-        h('div', { class: 'bar boss-hp' }, this.bossHp, this.bossHpText),
-        this.bossCast,
-        h('div', { class: 'boss-note' }, info.echo ? `超越之力 +${info.echo * 10}%` : 'Boss 招式在 M3 加入：這一版由木人代打，會普攻、死刑與全場 AoE'),
-      ),
+      this.bossBox,
       h('div', { class: 'hud-left' }, this.myStatus, h('div', { class: 'hud-party' }, h('h4', null, `隊伍 ${info.players.length} 人`), party)),
       h(
         'div',
@@ -237,6 +253,21 @@ export class Hud {
     this.denyTimer = window.setTimeout(() => this.denyText.classList.remove('show'), 1200);
   }
 
+  /** An enemy started a cast: tank busters show red, raid-wides purple, the enrage dark red. */
+  castKind(id: string, m: Extract<FightEvent, { k: 'bcast' }>['m']): void {
+    this.castKinds.set(id, m);
+  }
+
+  /** A line over the LB gauge for a moment (a mechanic done without a mistake). */
+  flashLb(text: string): void {
+    this.lbFlash.textContent = text;
+    this.lbFlash.classList.remove('show');
+    void this.lbFlash.offsetWidth;
+    this.lbFlash.classList.add('show');
+    window.clearTimeout(this.lbFlashTimer);
+    this.lbFlashTimer = window.setTimeout(() => this.lbFlash.classList.remove('show'), 2400);
+  }
+
   /** A big line in the middle of the screen (a Limit Break going off). */
   announce(text: string, cls = ''): void {
     this.banner.replaceChildren(h('span', { class: cls }, text));
@@ -301,15 +332,17 @@ export class Hud {
     }
 
     // the boss
-    const boss = s.e[0];
+    const boss = s.e.find((e) => FOES[e.kd].boss) ?? s.e[0];
     if (boss) {
       this.bossHp.style.width = pct(boss.hp / boss.mh);
-      this.bossHpText.textContent = `${pct(boss.hp / boss.mh)}`;
+      this.bossHpText.textContent = boss.u ? `${pct(boss.hp / boss.mh)}（無法選取）` : `${pct(boss.hp / boss.mh)}`;
+      this.bossBox.classList.toggle('dim', boss.u === 1);
       this.castBar(this.bossCast, boss.c ? { name: boss.c[0], left: boss.c[1], total: boss.c[2] } : null);
+      this.bossCast.dataset.m = boss.c ? (this.castKinds.get(boss.i) ?? 'mech') : '';
     }
 
-    // the party
-    const ranks = boss?.ag ?? [];
+    // the party; the enmity rank follows my target (or the boss)
+    const ranks = (s.e.find((e) => e.i === target) ?? boss)?.ag ?? [];
     for (const p of s.p) {
       const row = this.rows.get(p.i);
       if (!row) continue;
@@ -385,7 +418,7 @@ export class Hud {
     }
     const foe = s.e.find((e) => e.i === id);
     const p = s.p.find((x) => x.i === id);
-    const name = foe ? (this.info.foes.find((f) => f.id === id)?.name ?? '') : (this.info.players.find((x) => x.id === id)?.name ?? '');
+    const name = foe ? FOES[foe.kd].name : (this.info.players.find((x) => x.id === id)?.name ?? '');
     if (!foe && !p) {
       this.target.classList.remove('show');
       return;
@@ -451,7 +484,7 @@ export class Hud {
         h(
           'table',
           { class: 'stats' },
-          h('thead', null, h('tr', null, h('th', null, ''), h('th', null, '玩家'), h('th', null, '每秒傷害'), h('th', null, '每秒治療'), h('th', null, '承受傷害'), h('th', null, '倒地'))),
+          h('thead', null, h('tr', null, h('th', null, ''), h('th', null, '玩家'), h('th', null, '每秒傷害'), h('th', null, '每秒治療'), h('th', null, '承受傷害'), h('th', null, '倒地'), h('th', null, '失誤'))),
           h(
             'tbody',
             null,
@@ -466,6 +499,7 @@ export class Hud {
                 h('td', null, Math.round(st.heal / secsIn).toLocaleString()),
                 h('td', null, st.taken.toLocaleString()),
                 h('td', null, String(st.deaths)),
+                h('td', null, String(st.mistakes)),
               );
             }),
           ),

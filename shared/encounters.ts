@@ -43,7 +43,7 @@ export const ENCOUNTERS: readonly Encounter[] = [
     learn: '形狀、讀條、死刑、分攤與分散',
     desc: '峽谷平台上的岩石巨人。入門關：先學會看地面預兆與讀條名稱。',
     times: { normal: { target: 240, enrage: 360 }, hard: { target: 360, enrage: 420 } },
-    hp: { normal: 700_000, hard: 1_200_000 },
+    hp: { normal: 640_000, hard: 900_000 },
     theme: { sky: '#e9b98a', floor: '#c9925c', floorLine: '#9e6b3e', edge: '#7a4f2e', outside: '#5c3d27' },
   },
   {

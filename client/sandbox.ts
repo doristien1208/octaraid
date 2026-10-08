@@ -1,21 +1,23 @@
-import { TICK_MS } from '../shared/constants';
+import { TICK_MS, TICK_RATE } from '../shared/constants';
 import { ENCOUNTERS } from '../shared/encounters';
 import { DEFAULT_JOB_ORDER, isJobId, jobById, type JobId } from '../shared/jobs';
 import { hpScale, roleHasRoom } from '../shared/party';
 import type { C2S, GameStartInfo } from '../shared/protocol';
 import { Bot, spotFor } from '../shared/sim/bot';
 import { Fight } from '../shared/sim/fight';
-import { PRACTICE } from '../shared/sim/practice';
 import type { Audio } from './audio';
 import { clear, store } from './dom';
 import { GameView } from './game/view';
 
 /**
- * Offline practice, no room needed: ?sandbox&boss=0..3&hard&n=1..8&job=guardian&calm&lb
+ * Offline practice, no room needed: ?sandbox&boss=0..3&hard&n=1..8&job=guardian&dummy&calm&lb&skip=90&until=岩牢
  * The fight runs in this browser with the same rules as the server. Computer players fill the rest of
- * the party (role caps apply) and fight with simple rotations; calm: the dummy does not attack, for
- * measuring damage; lb: the Limit Break gauge starts full. ?sandbox&gallery lines all 8 jobs up facing
- * the camera, to compare their looks (&shot: without the HUD, for a group picture such as the hub thumbnail).
+ * the party (role caps apply), read the boss's attacks and play their rotations. dummy: the training
+ * dummy instead of the duty's boss; calm: a dummy that does not attack, for measuring damage; lb: the
+ * Limit Break gauge starts full; skip: a computer player plays my character for the first that many seconds,
+ * then it is mine (to practise a later part of the fight); until: the same, up to when the boss starts
+ * casting the move of that name. ?sandbox&gallery lines all 8 jobs up facing the camera, to compare their
+ * looks (&shot: without the HUD, for a group picture such as the hub thumbnail).
  */
 export function startSandbox(app: HTMLElement, audio: Audio): void {
   const q = new URLSearchParams(location.search);
@@ -28,6 +30,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   const hard = q.has('hard');
   const calm = q.has('calm');
   const gallery = q.has('gallery');
+  const dummy = q.has('dummy') || calm || gallery;
   const n = gallery ? 8 : int('n', 1, 8, 4);
   const jobParam = q.get('job');
   const myJob: JobId = isJobId(jobParam) ? jobParam : 'guardian';
@@ -41,7 +44,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   const roster = jobs.map((job, k) => (k === 0 ? { id: 'me', name: store.get('octaraid.name') || '你', job } : { id: `bot${k}`, name: `電腦${k}`, job }));
   const seed = Math.floor(Math.random() * 2 ** 31);
   const scale = hpScale(jobs);
-  const fight = new Fight(enc, hard, roster, seed, { hpScale: scale, calm: calm || gallery });
+  const fight = new Fight(enc, hard, roster, seed, { hpScale: scale, calm: calm || gallery, practice: dummy });
   if (gallery) {
     // two rows of four south of the dummy, everyone facing the camera: tanks and healers behind, DPS in front
     roster.forEach((r) => {
@@ -61,9 +64,21 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
     hpScale: scale,
     echo: 0,
     players: roster,
-    foes: [{ id: 'boss', name: PRACTICE.name, r: PRACTICE.ring }],
+    foes: fight.foes.map((f) => ({ id: f.id, kind: f.kind, name: f.name, r: f.r })),
   };
   const bots = gallery ? [] : roster.slice(1).map((r) => new Bot(fight, r.id, spotFor(r.job, roster.filter((x) => x.job === r.job).indexOf(r))));
+  const until = gallery ? null : q.get('until');
+  const skip = gallery ? 0 : int('skip', 0, 600, until ? 600 : 0);
+  if (skip > 0) {
+    const stand = new Bot(fight, 'me', spotFor(myJob, 0));
+    let found = false;
+    while (!found && fight.phase !== 'over' && fight.fightTicks < skip * TICK_RATE) {
+      stand.think();
+      for (const b of bots) b.think();
+      fight.step();
+      found = !!until && !!fight.snapshot().ev?.some((e) => e.k === 'bcast' && e.n === until);
+    }
+  }
 
   let timer = 0;
   let view: GameView | null = null;
@@ -91,7 +106,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   if (gallery && q.has('shot')) game.showcase(0.3, 6.6);
   game.addChat(
     '',
-    `離線練習：${enc.name}${hard ? ' Hard' : ''}，${roster.length} 人${calm ? '，木人不攻擊' : ''}；電腦隊友會自己走位與出招。按「結束測試」或時間到就結束。`,
+    `離線練習：${enc.name}${hard ? ' Hard' : ''}，${roster.length} 人，對手是${fight.foes[0]?.name ?? ''}${calm ? '（不攻擊）' : ''}；電腦隊友會自己走位與出招。按「結束測試」或時間到就結束。`,
   );
 
   let lbFill = q.has('lb');

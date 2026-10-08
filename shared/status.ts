@@ -23,7 +23,11 @@ export type StatusId =
   | 'brink'
   | 'risen'
   | 'airborne'
-  | 'echo';
+  | 'echo'
+  | 'dmgDown'
+  | 'vuln'
+  | 'crack'
+  | 'stun';
 
 export interface StatusInfo {
   name: string;
@@ -57,6 +61,10 @@ export interface StatusInfo {
   dot?: boolean;
   /** jumping: ground attacks miss */
   airborne?: boolean;
+  /** damage taken × (1 + taken × stacks): 易傷 stacks, 裂盾 counts once */
+  taken?: number;
+  /** cannot move or use skills (岩牢) */
+  stun?: boolean;
   /** given by a ground zone while standing in it (not shown with seconds) */
   zone?: boolean;
   /** goes away when the owner uses any action */
@@ -85,6 +93,11 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   risen: { name: '復活庇護', icon: '護', good: true, desc: '剛復活：不受傷害，使用任何技能就解除', invuln: true, breakOnAction: true },
   airborne: { name: '滯空', icon: '躍', good: true, desc: '在空中：地面攻擊打不到', airborne: true },
   echo: { name: '超越之力', icon: '超', good: true, desc: '滅團後變強：傷害、回復與最大 HP 提高' },
+  // penalties and boss effects (section 四 and 六)
+  dmgDown: { name: '傷害降低', icon: '弱', good: false, desc: '機制失誤（Normal）：造成的傷害 −25%', dmg: -0.25 },
+  vuln: { name: '易傷', icon: '易', good: false, desc: '機制失誤（Hard）：受到的傷害每層 +50%，可疊', taken: 0.5 },
+  crack: { name: '裂盾', icon: '裂', good: false, desc: '吃過死刑：受到的傷害 +100%，下一發換另一個坦克接', taken: 1 },
+  stun: { name: '岩牢', icon: '牢', good: false, desc: '被岩石包住：不受傷害，但不能移動與行動；隊友要在時間內打破岩牢', stun: true, invuln: true },
 };
 
 export const STATUS_IDS = Object.keys(STATUS) as StatusId[];

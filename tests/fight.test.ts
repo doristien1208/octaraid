@@ -40,7 +40,7 @@ describe('arena', () => {
 
 describe('fight', () => {
   it('counts down 10 seconds, then fights until the enrage', () => {
-    const f = new Fight(encounterById('colossus'), false, roster, 1, { calm: true });
+    const f = new Fight(encounterById('colossus'), false, roster, 1, { calm: true, practice: true });
     expect(f.snapshot().ph).toBe(0);
     for (let k = 0; k < RULES.countdown; k++) f.step();
     expect(f.phase).toBe('fight');

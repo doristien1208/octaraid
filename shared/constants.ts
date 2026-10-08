@@ -1,5 +1,5 @@
 /** Shown on the entry screen and in /healthz, so a deployment can be checked at a glance. */
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 
 /** The test machine gives this game port 3100; the Game Hub passes it in PORT as well. */
 export const DEFAULT_PORT = 3100;
@@ -67,6 +67,12 @@ export const RULES = {
   lbDpsRadius: 8,
   lbDpsBoss: 0.05,
   lbDpsAdd: 0.3,
+  /** a mechanic nobody got wrong adds this much (percent) */
+  lbClean: 5,
+  // mistakes: Normal 傷害降低, Hard 易傷 stacks
+  dmgDownTime: sec(15),
+  vulnTime: sec(30),
+  vulnMax: 4,
   // missing roles (缺角補正)
   noTankDamage: 0.5,
   noHealerRegen: 0.015, // of max HP per second

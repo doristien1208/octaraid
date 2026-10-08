@@ -1,3 +1,4 @@
+import { hasBoss } from '../../shared/bosses';
 import { MAX_PLAYERS, RULES } from '../../shared/constants';
 import { ENCOUNTERS, KIND_NAMES, VOTE_OPTIONS, clock, difficultyName, optionLabel } from '../../shared/encounters';
 import { JOBS, LIMIT_BREAKS, ROLE_COLORS, ROLE_NAMES, jobById, type JobId, type Role } from '../../shared/jobs';
@@ -242,7 +243,7 @@ export class RoomScreen {
           ),
         ),
       ),
-      h('p', { class: 'muted small' }, '這一版的對手是訓練木人：會普攻、死刑與全場 AoE，Boss 機制在下一階段（M3）加入。'),
+      h('p', { class: 'muted small' }, `已完成的 Boss：${ENCOUNTERS.filter((e) => hasBoss(e.id)).map((e) => e.boss).join('、')}；其他副本這一版還是訓練木人（會普攻、死刑與全場 AoE），之後陸續加入。`),
     );
   }
 

@@ -12,7 +12,6 @@ import {
   type Snapshot,
 } from '../shared/protocol';
 import { Fight } from '../shared/sim/fight';
-import { PRACTICE } from '../shared/sim/practice';
 import { tally, type Tally } from '../shared/vote';
 import { errorMsg, type Hub, type Session } from './hub';
 import { log } from './log';
@@ -199,15 +198,16 @@ export class Room {
       hpScale: Math.round(hpScale(jobs) * 1000) / 1000,
       echo: opt.hard ? 0 : (this.wipes.get(opt.index) ?? 0),
       players: this.members.map((x) => ({ id: x.s.id, name: x.s.name, job: x.job })),
-      foes: [{ id: 'boss', name: PRACTICE.name, r: PRACTICE.ring }],
+      foes: [],
     };
-    this.info = info;
     const countdownMs = this.hub.timing.countdownMs;
     const fight = new Fight(encounterById(opt.enc), opt.hard, info.players, info.seed, {
       hpScale: info.hpScale,
       echo: info.echo,
       countdown: countdownMs === undefined ? undefined : countdownMs / TICK_MS,
     });
+    info.foes = fight.foes.map((f) => ({ id: f.id, kind: f.kind, name: f.name, r: f.r }));
+    this.info = info;
     for (const x of this.members) if (!x.s.online) fight.setConnected(x.s.id, false);
     this.fight = fight;
     this.phase = 'playing';

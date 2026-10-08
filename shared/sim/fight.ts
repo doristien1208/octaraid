@@ -1,10 +1,13 @@
+import { scriptFor } from '../bosses';
+import { FOES, type FoeKind } from '../bosses/foes';
 import { RULES, TICK_RATE, sec } from '../constants';
 import type { Encounter } from '../encounters';
 import { LB_SLOT, LIMIT_BREAKS, ROLE_HP, jobById, type Fx, type Job, type JobId, type Role, type SkillInfo } from '../jobs';
-import type { DenyReason, EndReason, FightEvent, GameResult, PlayerStats, SnapStatus, Snapshot } from '../protocol';
+import type { DenyReason, EndReason, FightEvent, GameResult, PlayerStats, SnapStatus, SnapTele, Snapshot } from '../protocol';
 import { Rng } from '../rng';
 import { STATUS, STATUS_IDS, type StatusId } from '../status';
 import { angleDiff, clampToArena, faceTowards, reach, sideOf, spawnPoints } from './arena';
+import { BossBrain, type BossScript } from './boss';
 import { PRACTICE } from './practice';
 
 export interface StatusInst {
@@ -46,6 +49,8 @@ interface Dash {
   t1: number;
   /** the effects after a jump, carried out on landing */
   then?: { slot: number; fx: Fx[]; target: string };
+  /** knocked off a cliff: down on landing */
+  fall?: boolean;
 }
 
 export interface Fighter {
@@ -84,7 +89,8 @@ export interface Fighter {
 
 export interface FoeCast {
   name: string;
-  m: 'buster' | 'raidwide';
+  /** what the HUD makes of it: a raid-wide or a tank buster get their own colour */
+  m: 'buster' | 'raidwide' | 'mech' | 'enrage';
   start: number;
   end: number;
   target: string | null;
@@ -92,6 +98,7 @@ export interface FoeCast {
 
 export interface Foe {
   id: string;
+  kind: FoeKind;
   name: string;
   boss: boolean;
   x: number;
@@ -105,6 +112,19 @@ export interface Foe {
   target: string | null;
   cast: FoeCast | null;
   autoAt: number;
+  /** auto attack damage every 3 s (0: none) */
+  auto: number;
+  /** metres per second towards its target (0: stays put) */
+  speed: number;
+  /** cannot be targeted, hurt, and does not attack (a boss between phases) */
+  untargetable: boolean;
+  /** does not turn before this tick (it is aiming an attack) */
+  lockUntil: number;
+  /** the player a 岩牢 holds */
+  owner?: string;
+  /** dead or removed: kept a moment so clients can show it go */
+  gone?: boolean;
+  goneAt?: number;
 }
 
 export interface Zone {
@@ -125,6 +145,10 @@ export interface FightOptions {
   calm?: boolean;
   /** countdown before the pull, in ticks (the tests shorten it) */
   countdown?: number;
+  /** fight the training dummy even where the duty has a boss (offline practice with ?dummy) */
+  practice?: boolean;
+  /** a boss script instead of the duty's own (tests) */
+  script?: BossScript;
 }
 
 export type UseResult = 'ok' | 'queued' | DenyReason;
@@ -155,7 +179,12 @@ export class Fight {
   calm: boolean;
   /** the party at the start, for the missing-role rules */
   readonly roles: Readonly<Record<Role, number>>;
+  /** boss and add HP against the 4-player baseline */
+  readonly hpScale: number;
+  /** the boss script at work, or null for the training dummy */
+  readonly brain: BossBrain | null = null;
   private readonly rng: Rng;
+  private foeSeq = 0;
   private events: FightEvent[] = [];
   /** who is casting the Limit Break */
   private lbBy: string | null = null;
@@ -203,30 +232,20 @@ export class Fight {
         diedAt: -1,
         diedWeak: 0,
         autoRaised: false,
-        stats: { id: p.id, dmg: 0, heal: 0, taken: 0, deaths: 0 },
+        stats: { id: p.id, dmg: 0, heal: 0, taken: 0, deaths: 0, mistakes: 0 },
       };
       if (this.echo) fighter.statuses.push({ id: 'echo', src: p.id, until: -1, v: this.echo });
       fighter.hp = this.maxHp(fighter);
       this.players.set(p.id, fighter);
     });
     this.roles = roles;
-    const hp = Math.round((hard ? enc.hp.hard : enc.hp.normal) * (opts.hpScale ?? 1));
-    this.foes.push({
+    this.hpScale = opts.hpScale ?? 1;
+    const script = opts.practice ? null : (opts.script ?? scriptFor(enc.id, hard));
+    const boss = this.spawnFoe(script?.kind ?? 'dummy', 0, 0, Math.round((hard ? enc.hp.hard : enc.hp.normal) * this.hpScale), {
       id: 'boss',
-      name: PRACTICE.name,
-      boss: true,
-      x: 0,
-      z: 0,
-      f: 0, // facing south, towards the party
-      r: PRACTICE.ring,
-      hp,
-      maxHp: hp,
-      statuses: [],
-      enmity: new Map(),
-      target: null,
-      cast: null,
-      autoAt: 0,
+      auto: script?.auto ?? 0,
     });
+    if (script) this.brain = new BossBrain(this, boss, script);
   }
 
   get enrageTicks(): number {
@@ -246,7 +265,7 @@ export class Fight {
     if (p.dash) return null; // the server moves it for now; the client follows the snapshots
     const gap = p.reportedAt < 0 ? RULES.moveGap : Math.min(RULES.moveGap, Math.max(0, (nowMs - p.reportedAt) / 1000));
     p.reportedAt = nowMs;
-    if (p.dead) return Math.hypot(x - p.x, z - p.z) > 0.05 ? [p.x, p.z] : null;
+    if (p.dead || this.stunned(p)) return Math.hypot(x - p.x, z - p.z) > 0.05 ? [p.x, p.z] : null;
     const allowed = RULES.moveSpeed * gap * RULES.moveSlack + RULES.moveSlackM;
     let dx = x - p.x;
     let dz = z - p.z;
@@ -278,6 +297,7 @@ export class Fight {
     if (!p || !Number.isInteger(slot) || slot < 0 || slot > LB_SLOT) return 'target';
     if (this.phase !== 'fight') return 'phase';
     if (p.dead) return 'dead';
+    if (this.stunned(p)) return 'busy';
     return this.tryUse(p, slot, req.target ?? null, req.dx ?? 0, req.dz ?? 0, true);
   }
 
@@ -326,7 +346,11 @@ export class Fight {
     this.expire();
     if (this.fightTicks % RULES.dotTick === 0) this.overTime();
     this.autoRaise();
-    for (const foe of this.foes) this.foeStep(foe);
+    for (const foe of [...this.foes]) this.foeStep(foe);
+    for (let k = this.foes.length - 1; k >= 0; k--) {
+      const foe = this.foes[k]!;
+      if (foe.gone && this.tick >= (foe.goneAt ?? 0)) this.foes.splice(k, 1);
+    }
 
     const boss = this.foes.find((f) => f.boss);
     if (boss && boss.hp <= 0) this.end('clear');
@@ -382,10 +406,8 @@ export class Fight {
     if (kind === 'self') return null;
     const wanted = want ? (this.players.get(want) ?? this.foes.find((f) => f.id === want)) : undefined;
     if (kind === 'enemy') {
-      if (wanted && 'enmity' in wanted && wanted.hp > 0) return wanted;
-      let best: Foe | null = null;
-      for (const foe of this.foes) if (foe.hp > 0 && (!best || reach(p.x, p.z, foe) < reach(p.x, p.z, best))) best = foe;
-      return best ?? 'target';
+      if (wanted && 'enmity' in wanted && this.hittable(wanted)) return wanted;
+      return this.nearestFoe(p) ?? 'target';
     }
     if (kind === 'ally') {
       if (wanted && 'job' in wanted) return wanted.dead ? 'target' : wanted;
@@ -460,7 +482,7 @@ export class Fight {
     const ok =
       kind === 'self' ||
       (target !== null &&
-        (kind === 'enemy' ? 'enmity' in target && target.hp > 0 : kind === 'ally' ? 'job' in target && !target.dead : 'job' in target && target.dead));
+        (kind === 'enemy' ? 'enmity' in target && this.hittable(target) : kind === 'ally' ? 'job' in target && !target.dead : 'job' in target && target.dead));
     if (!ok) {
       if (lb) this.lbBy = null;
       this.emit({ k: 'intr', i: p.id });
@@ -508,7 +530,7 @@ export class Fight {
       const fx = list[i]!;
       switch (fx.k) {
         case 'hit': {
-          if (!foe || foe.hp <= 0) break;
+          if (!foe || !this.hittable(foe)) break;
           let p0 = fx.p;
           let pos: 0 | 1 | undefined;
           if (fx.rear || fx.flank) {
@@ -524,12 +546,12 @@ export class Fight {
           const cx = fx.at === 'me' ? p.x : foe?.x;
           const cz = fx.at === 'me' ? p.z : foe?.z;
           if (cx === undefined || cz === undefined) break;
-          for (const e of this.foes) if (e.hp > 0 && reach(cx, cz, e) <= fx.r) this.damageFoe(p, e, fx.p, slot, { enmity: fx.enmity });
+          for (const e of this.foes) if (this.hittable(e) && reach(cx, cz, e) <= fx.r) this.damageFoe(p, e, fx.p, slot, { enmity: fx.enmity });
           break;
         }
         case 'cone': {
           for (const e of this.foes) {
-            if (e.hp <= 0 || reach(p.x, p.z, e) > fx.r) continue;
+            if (!this.hittable(e) || reach(p.x, p.z, e) > fx.r) continue;
             const off = Math.abs(angleDiff(p.f, faceTowards(p.x, p.z, e.x, e.z)));
             const d = Math.hypot(e.x - p.x, e.z - p.z);
             // the ring counts: an enemy whose ring reaches into the fan is hit
@@ -541,7 +563,7 @@ export class Fight {
           const ux = Math.sin(p.f);
           const uz = Math.cos(p.f);
           for (const e of this.foes) {
-            if (e.hp <= 0) continue;
+            if (!this.hittable(e)) continue;
             const vx = e.x - p.x;
             const vz = e.z - p.z;
             const along = vx * ux + vz * uz;
@@ -551,7 +573,7 @@ export class Fight {
           break;
         }
         case 'dot':
-          if (foe && foe.hp > 0) this.addStatus(foe, { id: fx.s, src: p.id, until: this.tick + sec(fx.dur), v: fx.p }, true);
+          if (foe && this.hittable(foe)) this.addStatus(foe, { id: fx.s, src: p.id, until: this.tick + sec(fx.dur), v: fx.p }, true);
           break;
         case 'heal':
           if (ally) this.heal(p, ally, fx.amount, true);
@@ -637,9 +659,16 @@ export class Fight {
     if (k < 1) return;
     p.dash = null;
     p.reportedAt = -1; // the client restarts its reports from here
+    if (d.fall) {
+      // the body lies at the edge it went over, where a healer can reach it
+      [p.x, p.z] = clampToArena(this.enc.arena, p.x, p.z);
+      this.emit({ k: 'fell', i: p.id });
+      this.die(p);
+      return;
+    }
     if (d.then) {
       const foe = this.foes.find((f) => f.id === d.then!.target);
-      if (foe && foe.hp > 0) {
+      if (foe && this.hittable(foe)) {
         p.f = faceTowards(p.x, p.z, foe.x, foe.z);
         this.runFx(p, d.then.slot, d.then.fx, foe, 0, 0);
       }
@@ -674,7 +703,7 @@ export class Fight {
       const at = target && 'enmity' in target ? target : this.nearestFoe(p);
       if (!at) return;
       for (const e of this.foes) {
-        if (e.hp <= 0 || reach(at.x, at.z, e) > RULES.lbDpsRadius) continue;
+        if (!this.hittable(e) || reach(at.x, at.z, e) > RULES.lbDpsRadius) continue;
         const dmg = Math.round(e.maxHp * (e.boss ? RULES.lbDpsBoss : RULES.lbDpsAdd));
         this.dealFoe(p, e, dmg, LB_SLOT, {});
       }
@@ -692,7 +721,7 @@ export class Fight {
   }
 
   private dealFoe(p: Fighter, e: Foe, amount: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean; crit?: boolean }): void {
-    if (e.hp <= 0) return;
+    if (!this.hittable(e)) return;
     const dealt = Math.min(e.hp, amount);
     e.hp -= dealt;
     p.stats.dmg += dealt;
@@ -702,19 +731,24 @@ export class Fight {
     if (steal > 0 && !p.dead) this.heal(p, p, dealt * steal, false);
   }
 
-  /** An enemy (or the fight itself, src null) hurts a player. */
-  private damagePlayer(q: Fighter, raw: number, src: Foe | null): void {
-    if (q.dead) return;
+  /**
+   * An enemy (or the fight itself, src null) hurts a player: invulnerability, mitigation (multiplied),
+   * 易傷 and 裂盾, shields, then HP. Returns the HP lost. The boss engine (boss.ts) calls this too.
+   */
+  hurt(q: Fighter, raw: number, src: Foe | null): number {
+    if (q.dead) return 0;
     if (q.statuses.some((s) => STATUS[s.id].invuln)) {
       this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: 0, iv: 1 });
-      return;
+      return 0;
     }
     let amount = raw;
+    let taken = 1;
     for (const s of q.statuses) {
-      const mit = STATUS[s.id].mit;
-      if (mit) amount *= 1 - mit;
+      const info = STATUS[s.id];
+      if (info.mit) amount *= 1 - info.mit;
+      if (info.taken) taken += info.taken * (s.id === 'vuln' ? Math.max(1, s.v) : 1);
     }
-    amount = Math.round(amount);
+    amount = Math.round(amount * taken);
     let absorbed = 0;
     for (const s of q.statuses) {
       if (!STATUS[s.id].shield || amount <= 0) continue;
@@ -729,6 +763,94 @@ export class Fight {
     q.stats.taken += amount + absorbed;
     this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: amount, ab: absorbed || undefined });
     if (q.hp <= 0) this.die(q);
+    return amount;
+  }
+
+  /**
+   * A mechanic went wrong for this player (section 四): Normal gives 傷害降低 for 15 s, Hard another stack
+   * of 易傷 for 30 s. Counted in the results.
+   */
+  fail(q: Fighter, mech: string): void {
+    q.stats.mistakes++;
+    this.emit({ k: 'fail', i: q.id, n: mech });
+    if (q.dead) return; // the hit already took them down: no penalty to carry
+    if (this.hard) {
+      const old = q.statuses.find((s) => s.id === 'vuln');
+      const stacks = Math.min(RULES.vulnMax, (old?.v ?? 0) + 1);
+      this.addStatus(q, { id: 'vuln', src: 'boss', until: this.tick + RULES.vulnTime, v: stacks }, false);
+    } else this.addStatus(q, { id: 'dmgDown', src: 'boss', until: this.tick + RULES.dmgDownTime, v: 0 }, false);
+  }
+
+  /** Something knocks a player to (x1, z1); off a cliff, they go down when they land. */
+  knock(q: Fighter, x1: number, z1: number, ticks: number, fall: boolean): void {
+    if (q.dead) return;
+    if (q.cast) this.interrupt(q);
+    q.queued = null;
+    q.dash = { x0: q.x, z0: q.z, x1, z1, t0: this.tick, t1: this.tick + Math.max(1, ticks), fall };
+    q.movedAt = this.tick;
+    this.emit({ k: 'kb', i: q.id });
+  }
+
+  /** Down at once (crushed in a prison, the enrage). */
+  kill(q: Fighter): void {
+    if (!q.dead) this.die(q);
+  }
+
+  /** The fight's seeded random number, for the boss engine. */
+  random(): number {
+    return this.rng.next();
+  }
+
+  /** Adds a new enemy; it starts with the tanks on top of its list. */
+  spawnFoe(kind: FoeKind, x: number, z: number, hp: number, opts: { id?: string; auto?: number; owner?: string } = {}): Foe {
+    const info = FOES[kind];
+    const foe: Foe = {
+      id: opts.id ?? `${kind}${++this.foeSeq}`,
+      kind,
+      name: info.name,
+      boss: info.boss,
+      x,
+      z,
+      f: 0,
+      r: info.ring,
+      hp,
+      maxHp: hp,
+      statuses: [],
+      enmity: new Map(),
+      target: null,
+      cast: null,
+      autoAt: this.tick + sec(3),
+      auto: opts.auto ?? 0,
+      speed: info.speed,
+      untargetable: false,
+      lockUntil: 0,
+      owner: opts.owner,
+    };
+    if (this.phase === 'fight') for (const p of this.players.values()) if (!p.dead) foe.enmity.set(p.id, p.role === 'tank' ? 10 : 0);
+    this.foes.push(foe);
+    this.emit({ k: 'spawn', i: foe.id });
+    return foe;
+  }
+
+  /** Takes an enemy away (clients see it go for a moment). A prison set free lets its player go. */
+  despawn(foe: Foe): void {
+    if (foe.gone) return;
+    foe.gone = true;
+    foe.goneAt = this.tick + sec(1.5);
+    foe.cast = null;
+    if (foe.owner) {
+      const q = this.players.get(foe.owner);
+      if (q) q.statuses = q.statuses.filter((s) => s.id !== 'stun');
+    }
+  }
+
+  /** Can it be attacked: alive, here, and not between phases. */
+  hittable(foe: Foe): boolean {
+    return foe.hp > 0 && !foe.gone && !foe.untargetable;
+  }
+
+  private stunned(p: Fighter): boolean {
+    return p.statuses.some((s) => STATUS[s.id].stun);
   }
 
   /** Heals a player; returns the HP actually restored. Healing makes enmity on every enemy. */
@@ -762,7 +884,7 @@ export class Fight {
    * Puts a status on a player or an enemy. The same status refreshes rather than stacks; damage over time
    * is kept per source, so two lancers both bleed the boss.
    */
-  private addStatus(on: Fighter | Foe, s: StatusInst, perSource: boolean): void {
+  addStatus(on: Fighter | Foe, s: StatusInst, perSource: boolean): void {
     const k = on.statuses.findIndex((x) => x.id === s.id && (!perSource || x.src === s.src));
     if (k >= 0) on.statuses.splice(k, 1);
     on.statuses.push(s);
@@ -836,7 +958,7 @@ export class Fight {
       for (const s of foe.statuses) {
         if (!STATUS[s.id].dot) continue;
         const src = this.players.get(s.src);
-        if (src && foe.hp > 0) this.damageFoe(src, foe, s.v * n, 1, { dot: true });
+        if (src && this.hittable(foe)) this.damageFoe(src, foe, s.v * n, 1, { dot: true });
       }
     }
     for (const p of this.players.values()) {
@@ -865,14 +987,46 @@ export class Fight {
   // ================================================================ the enemy
 
   private foeStep(foe: Foe): void {
-    if (foe.hp <= 0) return;
-    const top = this.topOf(foe);
+    if (foe.gone) return;
+    if (foe.hp <= 0) {
+      // the boss falling ends the fight (step); a broken prison frees its player; adds lie there until
+      // their phase is over (the Hard rule may stand them up again)
+      if (foe.kind === 'prison') this.despawn(foe);
+      return;
+    }
+    const top = foe.untargetable ? null : this.topOf(foe);
     foe.target = top?.id ?? null;
-    if (top) {
+    if (top && this.tick >= foe.lockUntil) {
       const turn = angleDiff(foe.f, faceTowards(foe.x, foe.z, top.x, top.z));
       const max = 6 / TICK_RATE;
       foe.f += Math.max(-max, Math.min(max, turn));
     }
+    if (top && foe.speed > 0) {
+      // walk up to its target
+      const d = Math.hypot(top.x - foe.x, top.z - foe.z) - foe.r - 0.8;
+      if (d > 0) {
+        const step = Math.min(d, foe.speed / TICK_RATE);
+        const len = Math.hypot(top.x - foe.x, top.z - foe.z) || 1;
+        foe.x += ((top.x - foe.x) / len) * step;
+        foe.z += ((top.z - foe.z) / len) * step;
+      }
+    }
+    if (this.brain?.foe === foe) {
+      this.brain.step();
+      if (foe.cast && this.tick >= foe.cast.end) foe.cast = null;
+    } else if (foe.kind === 'dummy') {
+      this.practiceStep(foe, top);
+      return;
+    }
+    if (top && foe.auto > 0 && !foe.cast && this.tick >= foe.autoAt) {
+      foe.autoAt = this.tick + sec(3);
+      this.emit({ k: 'boss', i: foe.id, n: '攻擊', m: 'auto', t: top.id });
+      this.hurt(top, foe.auto * (this.roles.tank ? 1 : RULES.noTankDamage), foe);
+    }
+  }
+
+  /** The training dummy (M2): autos, a tank buster and a raid-wide on a loop (practice.ts). */
+  private practiceStep(foe: Foe, top: Fighter | null): void {
     if (this.calm) return;
     const diff = this.hard ? 'hard' : 'normal';
     const scale = this.roles.tank ? 1 : RULES.noTankDamage;
@@ -882,11 +1036,11 @@ export class Fight {
       foe.cast = null;
       foe.autoAt = this.tick + sec(PRACTICE.autoEvery);
       const move = PRACTICE.moves.find((m) => m.name === c.name)!;
-      this.emit({ k: 'boss', i: foe.id, n: c.name, m: c.m, t: c.target ?? undefined });
+      this.emit({ k: 'boss', i: foe.id, n: c.name, m: c.m === 'buster' ? 'buster' : 'raidwide', t: c.target ?? undefined });
       if (c.m === 'buster') {
         const victim = c.target ? this.players.get(c.target) : undefined;
-        if (victim) this.damagePlayer(victim, move.dmg[diff] * scale, foe);
-      } else for (const q of this.living()) this.damagePlayer(q, move.dmg[diff], foe);
+        if (victim) this.hurt(victim, move.dmg[diff] * scale, foe);
+      } else for (const q of this.living()) this.hurt(q, move.dmg[diff], foe);
       return;
     }
     for (const m of PRACTICE.moves) {
@@ -901,7 +1055,7 @@ export class Fight {
     if (top && this.tick >= foe.autoAt) {
       foe.autoAt = this.tick + sec(PRACTICE.autoEvery);
       this.emit({ k: 'boss', i: foe.id, n: '攻擊', m: 'auto', t: top.id });
-      this.damagePlayer(top, PRACTICE.auto[diff] * scale, foe);
+      this.hurt(top, PRACTICE.auto[diff] * scale, foe);
     }
   }
 
@@ -953,7 +1107,7 @@ export class Fight {
     return 'enmity' in t ? t : { x: t.x, z: t.z, r: RULES.playerRadius };
   }
 
-  private living(): Fighter[] {
+  living(): Fighter[] {
     return [...this.players.values()].filter((p) => !p.dead);
   }
 
@@ -963,15 +1117,38 @@ export class Fight {
 
   private nearestFoe(p: Fighter): Foe | null {
     let best: Foe | null = null;
-    for (const f of this.foes) if (f.hp > 0 && (!best || reach(p.x, p.z, f) < reach(p.x, p.z, best))) best = f;
+    for (const f of this.foes) if (this.hittable(f) && (!best || reach(p.x, p.z, f) < reach(p.x, p.z, best))) best = f;
     return best;
   }
 
-  private emit(e: FightEvent): void {
+  emit(e: FightEvent): void {
     this.events.push(e);
   }
 
   // ================================================================ snapshot
+
+  private telegraphs(): SnapTele[] | undefined {
+    const b = this.brain;
+    if (!b) return undefined;
+    const list = b.visible();
+    if (!list.length) return undefined;
+    return list.map((t) => {
+      const s = t.shape;
+      const shape: (string | number)[] =
+        s.k === 'circle'
+          ? ['c', r2(s.x), r2(s.z), s.r]
+          : s.k === 'donut'
+            ? ['d', r2(s.x), r2(s.z), s.r0, r2(s.r1)]
+            : s.k === 'cone'
+              ? ['f', r2(s.x), r2(s.z), r2(s.f), r2(s.r), s.deg]
+              : s.k === 'rect'
+                ? ['l', r2(s.x), r2(s.z), r2(s.f), r2(s.len), s.w]
+                : s.k === 'push'
+                  ? ['k', r2(s.x), r2(s.z), s.dist]
+                  : ['m'];
+      return { i: t.id, c: t.color, s: shape, o: b.holder(t)?.id, n: t.end - t.start, l: t.end - this.tick, x: t.text };
+    });
+  }
 
   snapshot(): Snapshot {
     const t = this.tick;
@@ -1005,6 +1182,7 @@ export class Fight {
       })),
       e: this.foes.map((f) => ({
         i: f.id,
+        kd: f.kind,
         x: r2(f.x),
         z: r2(f.z),
         f: r2(f.f),
@@ -1017,10 +1195,13 @@ export class Fight {
           .filter(([id]) => this.players.get(id)?.dead === false)
           .sort((a, b) => b[1] - a[1])
           .map(([id]) => id),
+        u: f.untargetable ? 1 : undefined,
+        g: f.gone || f.hp <= 0 ? 1 : undefined,
       })),
       zn: this.zones.length
         ? this.zones.map((z) => ({ s: STATUS_INDEX.get(z.s)!, o: z.owner, x: r2(z.x), z: r2(z.z), r: z.r, l: z.until - t }))
         : undefined,
+      tg: this.telegraphs(),
       ev: ev.length ? ev : undefined,
     };
   }

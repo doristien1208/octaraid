@@ -14,7 +14,7 @@ function fight(jobs: JobId[], opts: FightOptions & { hard?: boolean } = {}): Fig
     !!opts.hard,
     jobs.map((job, k) => ({ id: `p${k}`, name: `P${k}`, job })),
     42,
-    { hpScale: 10, ...opts },
+    { hpScale: 10, practice: true, ...opts },
   );
   for (let k = 0; k < RULES.countdown; k++) f.step();
   expect(f.phase).toBe('fight');

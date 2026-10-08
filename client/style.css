@@ -1796,3 +1796,105 @@ p {
 .net-status.show {
   display: block;
 }
+
+/* M3: bosses, adds and their telegraphs */
+.nameplate.add {
+  background: rgba(130, 40, 30, 0.7);
+  padding: 2px 9px;
+}
+
+.nameplate.dim {
+  opacity: 0.45;
+}
+
+.hud-boss.dim .bar.boss-hp i {
+  background: linear-gradient(90deg, #8a8a94, #5d5d66);
+}
+
+.hud-boss.dim .boss-name {
+  opacity: 0.6;
+}
+
+.cast-bar.boss[data-m='mech'] i {
+  background: linear-gradient(90deg, #ffc46a, #ff8a1f);
+}
+
+.cast-bar.boss[data-m='buster'] i {
+  background: linear-gradient(90deg, #ff7a7a, #e02828);
+}
+
+.cast-bar.boss[data-m='raidwide'] i {
+  background: linear-gradient(90deg, #c79bff, #8a4dff);
+}
+
+.cast-bar.boss[data-m='enrage'] i {
+  background: linear-gradient(90deg, #ff4d4d, #8a0000);
+  animation: enragepulse 0.8s ease-in-out infinite;
+}
+
+@keyframes enragepulse {
+  50% {
+    filter: brightness(1.5);
+  }
+}
+
+.hud-banner .phase {
+  color: #ffd9a8;
+}
+
+.lb-flash {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  font-size: 13px;
+  font-weight: 900;
+  color: #ffd34d;
+  text-shadow: 0 2px 4px #000;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lb-flash.show {
+  animation: lbflash 2.4s ease-out forwards;
+}
+
+@keyframes lbflash {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  12%,
+  75% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.float.fail {
+  font-size: 14px;
+  color: #ffa23c;
+}
+
+.tele-label {
+  font-family: var(--font);
+  font-weight: 900;
+  font-size: 13px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+  background: rgba(16, 12, 32, 0.65);
+  pointer-events: none;
+}
+
+.tele-label.y {
+  color: #ffe14d;
+}
+
+.tele-label.p {
+  color: #d9a8ff;
+}

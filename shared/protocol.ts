@@ -1,3 +1,4 @@
+import type { FoeKind } from './bosses/foes';
 import type { EncounterId } from './encounters';
 import type { JobId, Role } from './jobs';
 import type { Tally } from './vote';
@@ -39,8 +40,8 @@ export interface GameStartInfo {
   /** 超越之力 stacks (Normal only: +10% each, from wipes on this duty in this room) */
   echo: number;
   players: GamePlayerInfo[];
-  /** the enemies: id, name and the radius of their target ring */
-  foes: { id: string; name: string; r: number }[];
+  /** the enemies at the start: id, kind, name and the radius of their target ring (more can appear) */
+  foes: { id: string; kind: FoeKind; name: string; r: number }[];
 }
 
 /** Statuses in a snapshot: [index into STATUS_IDS, ticks left (−1 while it comes from a zone), value]. */
@@ -73,6 +74,7 @@ export interface SnapPlayer {
 
 export interface SnapFoe {
   i: string;
+  kd: FoeKind;
   x: number;
   z: number;
   f: number;
@@ -85,6 +87,28 @@ export interface SnapFoe {
   st?: SnapStatus[];
   /** living players by enmity, highest first */
   ag: string[];
+  /** cannot be targeted (a boss between phases) */
+  u?: 1;
+  /** dead or gone: shown going away for a moment */
+  g?: 1;
+}
+
+/**
+ * A boss attack's ground telegraph (or a marker over a head) while it is coming. Shapes:
+ * ['c', x, z, r] circle, ['d', x, z, r0, r1] donut, ['f', x, z, facing, r, degrees] fan,
+ * ['l', x, z, facing, length, width] strip, ['m'] marker only, ['k', x, z, distance] knockback.
+ * Colours: o orange ground damage, y yellow stack, p purple spread, r red buster or death, w white knockback.
+ */
+export interface SnapTele {
+  i: number;
+  c: 'o' | 'y' | 'p' | 'r' | 'w';
+  s: (string | number)[];
+  /** sits on this player (spreads, stacks, buster markers) */
+  o?: string;
+  n: number; // ticks shown in all
+  l: number; // ticks left
+  /** e.g. how many people a stack wants */
+  x?: string;
 }
 
 /** A circle on the ground from a skill (星界領域, 魔力湧泉). */
@@ -113,10 +137,22 @@ export type FightEvent =
   | { k: 'raise'; i: string; by: string | null }
   /** a Limit Break went off */
   | { k: 'lb'; i: string; r: Role }
-  /** a boss move went off: auto attack, tank buster, raid-wide */
-  | { k: 'boss'; i: string; n: string; m: 'auto' | 'buster' | 'raidwide'; t?: string }
+  /** an enemy move went off: auto attack, tank buster, raid-wide, the leap, a prison, adds, an add getting up */
+  | { k: 'boss'; i: string; n: string; m: 'auto' | 'buster' | 'raidwide' | 'jump' | 'prison' | 'adds' | 'revive'; t?: string }
   /** a boss started casting a named move that takes d ticks */
-  | { k: 'bcast'; i: string; n: string; m: 'buster' | 'raidwide'; t?: string; d: number };
+  | { k: 'bcast'; i: string; n: string; m: 'buster' | 'raidwide' | 'mech' | 'enrage'; t?: string; d: number }
+  /** a new phase (u: the boss cannot be hit during it) */
+  | { k: 'phase'; i: string; n: string; u?: 1 }
+  /** a mechanic went wrong for this player (the penalty follows) */
+  | { k: 'fail'; i: string; n: string }
+  /** a mechanic went off without a mistake: +5% Limit Break */
+  | { k: 'clean'; n: string }
+  /** knocked back (the server moves them) */
+  | { k: 'kb'; i: string }
+  /** knocked off the cliff */
+  | { k: 'fell'; i: string }
+  /** a new enemy appeared */
+  | { k: 'spawn'; i: string };
 
 export interface Snapshot {
   k: number; // tick
@@ -127,6 +163,7 @@ export interface Snapshot {
   p: SnapPlayer[];
   e: SnapFoe[];
   zn?: SnapZone[];
+  tg?: SnapTele[];
   ev?: FightEvent[];
 }
 
@@ -141,6 +178,8 @@ export interface PlayerStats {
   heal: number;
   taken: number;
   deaths: number;
+  /** mechanics gone wrong */
+  mistakes: number;
 }
 
 export interface GameResult {
