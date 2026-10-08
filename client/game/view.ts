@@ -80,6 +80,8 @@ export class GameView {
   private fpsFrom = 0;
   private lastCount = -1;
   private lbFull = false;
+  /** a fixed point for the camera instead of my character (the gallery) */
+  private focusAt: { x: number; z: number } | null = null;
 
   constructor(
     readonly info: GameStartInfo,
@@ -155,6 +157,7 @@ export class GameView {
       this.scene.add(a.root);
     }
     if (this.target) this.pick(this.target);
+    if (this.focusAt) this.avatars.get(this.meId)?.hideMarker();
   }
 
   // ------------------------------------------------------------- from the server
@@ -227,6 +230,14 @@ export class GameView {
 
   setHost(host: boolean): void {
     this.hud.setHost(host);
+  }
+
+  /** A group picture: no HUD, no name plates, no marker under me, the camera on (x, z). */
+  showcase(x: number, z: number): void {
+    this.focusAt = { x, z };
+    this.hud.el.style.display = 'none';
+    this.labels.domElement.style.display = 'none';
+    this.avatars.get(this.meId)?.hideMarker();
   }
 
   destroy(): void {
@@ -644,7 +655,7 @@ export class GameView {
     else this.dummy.update(0, 0, 0, dt, time);
     this.effects.update(dt, time);
 
-    const focus = this.me ?? { x: 0, z: this.enc.arena.size * 0.55 };
+    const focus = this.focusAt ?? this.me ?? { x: 0, z: this.enc.arena.size * 0.55 };
     this.rig.update(focus.x, focus.z);
     for (const m of this.arena.waymarks) m.rotation.z = this.rig.yaw;
     this.renderer.render(this.scene, this.camera);

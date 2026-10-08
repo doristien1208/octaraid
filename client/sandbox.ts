@@ -1,6 +1,6 @@
 import { TICK_MS } from '../shared/constants';
 import { ENCOUNTERS } from '../shared/encounters';
-import { DEFAULT_JOB_ORDER, isJobId, type JobId } from '../shared/jobs';
+import { DEFAULT_JOB_ORDER, isJobId, jobById, type JobId } from '../shared/jobs';
 import { hpScale, roleHasRoom } from '../shared/party';
 import type { C2S, GameStartInfo } from '../shared/protocol';
 import { Bot, spotFor } from '../shared/sim/bot';
@@ -15,7 +15,7 @@ import { GameView } from './game/view';
  * The fight runs in this browser with the same rules as the server. Computer players fill the rest of
  * the party (role caps apply) and fight with simple rotations; calm: the dummy does not attack, for
  * measuring damage; lb: the Limit Break gauge starts full. ?sandbox&gallery lines all 8 jobs up facing
- * the camera, to compare their looks.
+ * the camera, to compare their looks (&shot: without the HUD, for a group picture such as the hub thumbnail).
  */
 export function startSandbox(app: HTMLElement, audio: Audio): void {
   const q = new URLSearchParams(location.search);
@@ -43,12 +43,14 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   const scale = hpScale(jobs);
   const fight = new Fight(enc, hard, roster, seed, { hpScale: scale, calm: calm || gallery });
   if (gallery) {
-    // a row across the south of the arena, everyone facing the camera, me in the middle
-    roster.forEach((r, k) => {
+    // two rows of four south of the dummy, everyone facing the camera: tanks and healers behind, DPS in front
+    roster.forEach((r) => {
       const p = fight.players.get(r.id)!;
-      const slot = k === 0 ? 3.5 : k <= 3 ? k - 1 : k;
-      p.x = (slot - 3.5) * 2.2;
-      p.z = 6;
+      const back = jobById(r.job).role !== 'dps';
+      const row = roster.filter((x) => (jobById(x.job).role !== 'dps') === back);
+      const i = row.indexOf(r);
+      p.x = (i - 1.5) * 2.1 + (back ? 0.6 : 0);
+      p.z = back ? 5.4 : 7.6;
       p.f = 0;
     });
   }
@@ -86,6 +88,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   game.setHost(true);
   clear(app);
   app.append(game.root);
+  if (gallery && q.has('shot')) game.showcase(0.3, 6.6);
   game.addChat(
     '',
     `離線練習：${enc.name}${hard ? ' Hard' : ''}，${roster.length} 人${calm ? '，木人不攻擊' : ''}；電腦隊友會自己走位與出招。按「結束測試」或時間到就結束。`,

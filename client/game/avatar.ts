@@ -175,6 +175,7 @@ export class Avatar {
   private readonly plate: HTMLElement;
   private readonly picked: THREE.Mesh;
   private readonly bubble: THREE.Mesh;
+  private readonly marker: THREE.Mesh | null = null;
   private dead = false;
   private casting = false;
 
@@ -197,9 +198,9 @@ export class Avatar {
     shadow.rotation.x = -Math.PI / 2;
     this.root.add(shadow);
     if (mine) {
-      const me = mesh(new THREE.RingGeometry(0.6, 0.72, 40), myRingMaterial(), 0, 0.03, 0);
-      me.rotation.x = -Math.PI / 2;
-      this.root.add(me);
+      this.marker = mesh(new THREE.RingGeometry(0.6, 0.72, 40), myRingMaterial(), 0, 0.03, 0);
+      this.marker.rotation.x = -Math.PI / 2;
+      this.root.add(this.marker);
     }
     this.picked = mesh(new THREE.RingGeometry(0.78, 0.98, 40), pickMaterial('ally'), 0, 0.025, 0);
     this.picked.rotation.x = -Math.PI / 2;
@@ -419,6 +420,11 @@ export class Avatar {
 
   setOffline(off: boolean): void {
     this.plate.classList.toggle('offline', off);
+  }
+
+  /** hides the ring under my own character (the gallery's group picture) */
+  hideMarker(): void {
+    if (this.marker) this.marker.visible = false;
   }
 
   /** Places and animates the character for this frame; lift raises it (a jump). */
