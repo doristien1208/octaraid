@@ -48,7 +48,7 @@ export const MOVE_KEYS: Readonly<Record<string, MoveKey>> = {
 const MODIFIERS = new Set(['ControlLeft', 'ShiftLeft', 'AltLeft']);
 /**
  * Keys the browser or the system takes first, plus Esc (cancel) and Backspace (clear) of the editor.
- * Tab and F1–F8 are kept for choosing targets (M2).
+ * Tab, F1–F8 and Esc choose targets.
  */
 const RESERVED = /^(Escape|Tab|Backspace|F\d{1,2}|Meta(Left|Right)|OS(Left|Right)|ContextMenu|CapsLock|NumLock|ScrollLock|PrintScreen|Pause|Fn|FnLock)$/;
 

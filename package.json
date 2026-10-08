@@ -1,6 +1,6 @@
 {
   "name": "octaraid",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "八方討伐：FF14 風格的 3D 網頁團隊討伐戰，1–8 人連線",
   "type": "module",

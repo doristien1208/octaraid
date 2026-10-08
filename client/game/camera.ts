@@ -8,13 +8,16 @@ const MAX_DIST = 32;
 /**
  * Third-person orbit camera. Dragging with either mouse button turns it, the wheel zooms, and the
  * top-down view (V) looks almost straight down so ground markers are easy to read. yaw 0 looks north.
+ * A left click that does not drag is passed on (choosing a target).
  */
 export class CameraRig {
   yaw = 0;
   pitch = 0.78;
   dist = 16;
+  /** a left click without dragging, in client pixels */
+  onClick: ((x: number, y: number) => void) | null = null;
   private top: { pitch: number; dist: number } | null = null;
-  private drag: { id: number; x: number; y: number } | null = null;
+  private drag: { id: number; x: number; y: number; button: number; moved: number; at: number } | null = null;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -72,7 +75,7 @@ export class CameraRig {
 
   private onDown = (e: PointerEvent) => {
     if (e.button !== 0 && e.button !== 2) return;
-    this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, button: e.button, moved: 0, at: performance.now() };
     this.el.setPointerCapture(e.pointerId);
   };
 
@@ -82,13 +85,18 @@ export class CameraRig {
     const dy = e.clientY - this.drag.y;
     this.drag.x = e.clientX;
     this.drag.y = e.clientY;
+    this.drag.moved += Math.abs(dx) + Math.abs(dy);
+    if (this.drag.moved < 5) return; // a click wobbles a little before it lets go
     this.yaw -= dx * 0.006;
     this.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, this.pitch + dy * 0.005));
     this.top = null; // turning by hand leaves the top-down view
   };
 
   private onUp = (e: PointerEvent) => {
-    if (this.drag?.id === e.pointerId) this.drag = null;
+    const d = this.drag;
+    if (d?.id !== e.pointerId) return;
+    this.drag = null;
+    if (d.button === 0 && d.moved < 5 && performance.now() - d.at < 500) this.onClick?.(e.clientX, e.clientY);
   };
 
   private onWheel = (e: WheelEvent) => {

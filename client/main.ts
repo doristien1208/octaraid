@@ -2,6 +2,7 @@ import './style.css';
 import type { C2S, RoomView, S2C } from '../shared/protocol';
 import { Audio } from './audio';
 import { clear, h, store, toast } from './dom';
+import { loadModels } from './game/assets';
 import { GameView } from './game/view';
 import { Net, TOKEN_KEY } from './net';
 import { startSandbox } from './sandbox';
@@ -126,6 +127,9 @@ net.onMessage = (m: S2C) => {
     case 'pos':
       game?.onCorrection(m.x, m.z);
       break;
+    case 'deny':
+      game?.onDeny(m.s, m.why);
+      break;
     case 'end':
       game?.onEnd(m.result);
       break;
@@ -149,6 +153,8 @@ try {
 } catch {
   /* ignore */
 }
+// the character models load in the background while people sit in the waiting room
+void loadModels();
 const savedName = store.get('octaraid.name');
 if (new URLSearchParams(location.search).has('sandbox')) startSandbox(app, audio);
 else if (resumable && savedName) {

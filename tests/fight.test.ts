@@ -40,14 +40,15 @@ describe('arena', () => {
 
 describe('fight', () => {
   it('counts down 10 seconds, then fights until the enrage', () => {
-    const f = new Fight(encounterById('colossus'), false, roster, 1);
+    const f = new Fight(encounterById('colossus'), false, roster, 1, { calm: true });
     expect(f.snapshot().ph).toBe(0);
     for (let k = 0; k < RULES.countdown; k++) f.step();
     expect(f.phase).toBe('fight');
     const enrage = encounterById('colossus').times.normal.enrage;
     for (let k = 0; k < enrage * TICK_RATE; k++) f.step();
     expect(f.phase).toBe('over');
-    expect(f.result).toEqual({ reason: 'enrage', time: enrage });
+    expect(f.result).toMatchObject({ reason: 'enrage', time: enrage, bossHp: 1 });
+    expect(f.result!.stats.map((s) => s.id)).toEqual(['a', 'b']);
   });
 
   it('accepts ordinary steps and moves the player', () => {

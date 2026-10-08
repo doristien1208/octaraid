@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { ROLE_COLORS, type Job, type JobId } from '../../shared/jobs';
+import type { Job, JobId } from '../../shared/jobs';
 
 /**
- * Code-built models: a chibi character per job and the training dummy that stands in for the boss
- * until the boss fights land (M3). The characters will be swapped for the CC0 KayKit models once
- * they are downloaded; these stay as the fallback. Models face +z.
+ * Code-built models: the training dummy that stands in for the boss until the boss fights land (M3), the
+ * shared cartoon materials and shapes, and a chibi character per job, used when the KayKit models
+ * (avatar.ts) cannot be loaded. Models face +z.
  */
 
 let gradient: THREE.DataTexture | null = null;
@@ -52,17 +52,19 @@ function geo(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometr
   return g;
 }
 
-const box = (w: number, hgt: number, d: number) => geo(`b${w},${hgt},${d}`, () => new THREE.BoxGeometry(w, hgt, d));
-const ball = (r: number) => geo(`s${r}`, () => new THREE.SphereGeometry(r, 20, 14));
-const cap = (r: number) => geo(`c${r}`, () => new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.55));
-const cyl = (rt: number, rb: number, hgt: number, seg = 16) =>
+export const box = (w: number, hgt: number, d: number) => geo(`b${w},${hgt},${d}`, () => new THREE.BoxGeometry(w, hgt, d));
+export const ball = (r: number) => geo(`s${r}`, () => new THREE.SphereGeometry(r, 20, 14));
+export const cap = (r: number) => geo(`c${r}`, () => new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.55));
+export const cyl = (rt: number, rb: number, hgt: number, seg = 16) =>
   geo(`y${rt},${rb},${hgt},${seg}`, () => new THREE.CylinderGeometry(rt, rb, hgt, seg));
-const cone = (r: number, hgt: number, seg = 16) => geo(`k${r},${hgt},${seg}`, () => new THREE.ConeGeometry(r, hgt, seg));
-const ring = (r: number, t: number, arc = Math.PI * 2) =>
+export const cone = (r: number, hgt: number, seg = 16) => geo(`k${r},${hgt},${seg}`, () => new THREE.ConeGeometry(r, hgt, seg));
+export const ring = (r: number, t: number, arc = Math.PI * 2) =>
   geo(`t${r},${t},${arc}`, () => new THREE.TorusGeometry(r, t, 8, 32, arc));
-const gem = (r: number) => geo(`o${r}`, () => new THREE.OctahedronGeometry(r));
+export const gem = (r: number) => geo(`o${r}`, () => new THREE.OctahedronGeometry(r));
+export const disc = (r: number) => geo(`d${r}`, () => new THREE.CircleGeometry(r, 40));
+export const flatRing = (r0: number, r1: number) => geo(`f${r0},${r1}`, () => new THREE.RingGeometry(r0, r1, 48));
 
-function mesh(g: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
+export function mesh(g: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
   const o = new THREE.Mesh(g, m);
   o.position.set(x, y, z);
   return o;
@@ -90,24 +92,18 @@ interface Orbiter {
   phase: number;
 }
 
-/** One player character: the body, its walk cycle, a name plate and a shadow. */
-export class Avatar {
-  readonly root = new THREE.Group();
-  private readonly body = new THREE.Group();
+/** A code-built character with a simple walk cycle: the fallback when the KayKit models do not load. */
+export class CodeBody {
+  readonly body = new THREE.Group();
   private readonly legL = new THREE.Group();
   private readonly legR = new THREE.Group();
   private readonly armL = new THREE.Group();
   private readonly armR = new THREE.Group();
   private readonly orbiters: Orbiter[] = [];
-  private readonly plate: HTMLElement;
   private walk = 0;
   private blend = 0;
 
-  constructor(
-    readonly job: Job,
-    name: string,
-    mine: boolean,
-  ) {
+  constructor(readonly job: Job) {
     const main = toon(job.colors.main);
     const trim = toon(job.colors.trim);
     const skin = toon(SKIN);
@@ -144,30 +140,6 @@ export class Avatar {
     for (const x of [0.11, -0.11]) this.body.add(mesh(box(0.06, 0.1, 0.02), dark, x, 1.4, 0.33));
 
     this.dress(job.id, main, trim);
-    this.root.add(this.body);
-
-    // blob shadow and, for my own character, a ring on the ground
-    const shadow = mesh(geo('shadow', () => new THREE.CircleGeometry(0.5, 24)), shadowMaterial(), 0, 0.02, 0);
-    shadow.rotation.x = -Math.PI / 2;
-    this.root.add(shadow);
-    if (mine) {
-      const me = mesh(geo('mering', () => new THREE.RingGeometry(0.6, 0.72, 40)), myRingMaterial(), 0, 0.03, 0);
-      me.rotation.x = -Math.PI / 2;
-      this.root.add(me);
-    }
-
-    this.plate = document.createElement('div');
-    this.plate.className = `nameplate ${mine ? 'mine' : ''}`;
-    const badge = document.createElement('span');
-    badge.className = 'np-role';
-    badge.style.background = ROLE_COLORS[job.role];
-    badge.textContent = job.icon;
-    const label = document.createElement('span');
-    label.textContent = name;
-    this.plate.append(badge, label);
-    const tag = new CSS2DObject(this.plate);
-    tag.position.set(0, job.id === 'sorcerer' ? 2.55 : 2.2, 0);
-    this.root.add(tag);
   }
 
   /** Hats, weapons and floating bits that make each job recognisable at a glance. */
@@ -295,10 +267,8 @@ export class Avatar {
     }
   }
 
-  /** Places and animates the character for this frame. */
-  update(x: number, z: number, f: number, moving: boolean, dt: number, time: number): void {
-    this.root.position.set(x, 0, z);
-    this.root.rotation.y = f;
+  /** Animates the walk cycle for this frame. */
+  update(moving: boolean, dt: number, time: number): void {
     this.blend += ((moving ? 1 : 0) - this.blend) * Math.min(1, dt * 10);
     if (moving) this.walk += dt * 11;
     const s = Math.sin(this.walk) * this.blend;
@@ -313,78 +283,125 @@ export class Avatar {
       o.obj.rotation.y = a * 2;
     }
   }
-
-  setOffline(off: boolean): void {
-    this.plate.classList.toggle('offline', off);
-  }
-
-  dispose(): void {
-    this.plate.remove();
-  }
 }
 
 let shadowMat: THREE.Material | null = null;
-function shadowMaterial(): THREE.Material {
+export function shadowMaterial(): THREE.Material {
   shadowMat ??= new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
   return shadowMat;
 }
 
 let myRingMat: THREE.Material | null = null;
-function myRingMaterial(): THREE.Material {
+export function myRingMaterial(): THREE.Material {
   myRingMat ??= new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 0.9, depthWrite: false });
   return myRingMat;
 }
 
 /**
- * The training dummy (木人) that stands where the boss will be. It faces south, towards the party,
- * and carries the boss's target ring: positionals (rear / flank) are read against it in M2.
+ * The training dummy (木人) that stands where the boss will be. It turns to face whoever is top of its
+ * enmity list and carries the boss's target ring: a gap marks its rear, ticks the corners of the 90°
+ * rear and flank arcs (positionals), an arrow its front.
  */
-export function makeDummy(name: string): { root: THREE.Group; dispose(): void } {
-  const root = new THREE.Group();
-  const body = new THREE.Group();
-  const wood = toon('#b98b58');
-  const darkWood = toon('#7a5432');
-  const red = toon('#d84343');
-  body.add(mesh(cyl(0.65, 0.75, 0.2, 24), darkWood, 0, 0.1, 0));
-  body.add(mesh(cyl(0.13, 0.13, 1.3), darkWood, 0, 0.75, 0));
-  body.add(mesh(cyl(0.42, 0.38, 1.0, 20), wood, 0, 1.75, 0));
-  const arms = mesh(cyl(0.09, 0.09, 1.6), darkWood, 0, 1.95, 0);
-  arms.rotation.z = Math.PI / 2;
-  body.add(arms);
-  body.add(mesh(ball(0.32), wood, 0, 2.55, 0));
-  const target = mesh(ring(0.22, 0.05), red, 0, 1.8, 0.4);
-  body.add(target);
-  body.add(mesh(ball(0.07), red, 0, 1.8, 0.42));
-  body.scale.setScalar(1.5);
-  root.add(body);
+export class Dummy {
+  readonly root = new THREE.Group();
+  private readonly body = new THREE.Group();
+  private readonly ringMat = new THREE.MeshBasicMaterial({ color: 0xff6b6b, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
+  private readonly pickMat = new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
+  private readonly glowMat = new THREE.MeshBasicMaterial({ color: 0xffb03b, transparent: true, opacity: 0, depthWrite: false });
+  private readonly geos: THREE.BufferGeometry[] = [];
+  private readonly picked: THREE.Mesh;
+  private readonly plate: HTMLElement;
+  private shake = 0;
+  private casting = false;
+  private glow = 0;
+  /** what a mouse click on the dummy hits */
+  readonly hitbox: THREE.Mesh;
 
-  // the target ring on the ground, with a notch at the back (the rear positional side)
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0xff6b6b, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
-  const ringGeo = new THREE.RingGeometry(2.3, 2.45, 64, 1, Math.PI * 0.6, Math.PI * 1.8);
-  const groundRing = new THREE.Mesh(ringGeo, ringMat);
-  groundRing.rotation.x = -Math.PI / 2;
-  groundRing.position.y = 0.03;
-  root.add(groundRing);
-  const arrowGeo = new THREE.ConeGeometry(0.3, 0.5, 3);
-  const arrow = new THREE.Mesh(arrowGeo, ringMat);
-  arrow.rotation.x = Math.PI / 2;
-  arrow.position.set(0, 0.04, 2.75);
-  root.add(arrow);
+  constructor(name: string, readonly r: number) {
+    const wood = toon('#b98b58');
+    const darkWood = toon('#7a5432');
+    const red = toon('#d84343');
+    const b = this.body;
+    b.add(mesh(cyl(0.65, 0.75, 0.2, 24), darkWood, 0, 0.1, 0));
+    b.add(mesh(cyl(0.13, 0.13, 1.3), darkWood, 0, 0.75, 0));
+    b.add(mesh(cyl(0.42, 0.38, 1.0, 20), wood, 0, 1.75, 0));
+    const arms = mesh(cyl(0.09, 0.09, 1.6), darkWood, 0, 1.95, 0);
+    arms.rotation.z = Math.PI / 2;
+    b.add(arms);
+    b.add(mesh(ball(0.32), wood, 0, 2.55, 0));
+    b.add(mesh(ring(0.22, 0.05), red, 0, 1.8, 0.4));
+    b.add(mesh(ball(0.07), red, 0, 1.8, 0.42));
+    b.scale.setScalar(1.5);
+    this.root.add(b);
 
-  const plate = document.createElement('div');
-  plate.className = 'nameplate boss';
-  plate.textContent = name;
-  const tag = new CSS2DObject(plate);
-  tag.position.set(0, 4.6, 0);
-  root.add(tag);
+    const own = <T extends THREE.BufferGeometry>(g: T) => (this.geos.push(g), g);
+    const flat = (m: THREE.Mesh, y: number) => {
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = y;
+      this.root.add(m);
+      return m;
+    };
+    // the ring with a gap at the back; ticks at ±45° and ±135° split front, flanks and rear
+    flat(new THREE.Mesh(own(new THREE.RingGeometry(r - 0.1, r + 0.05, 64, 1, Math.PI * 0.6, Math.PI * 1.8)), this.ringMat), 0.03);
+    for (const a of [Math.PI / 4, (Math.PI * 3) / 4, (Math.PI * 5) / 4, (Math.PI * 7) / 4]) {
+      const tick = new THREE.Mesh(own(new THREE.PlaneGeometry(0.12, 0.7)), this.ringMat);
+      tick.rotation.x = -Math.PI / 2;
+      tick.rotation.z = a; // after lying flat, the long side points away from the centre
+      tick.position.set(Math.sin(a) * (r + 0.3), 0.035, Math.cos(a) * (r + 0.3));
+      this.root.add(tick);
+    }
+    const arrow = new THREE.Mesh(own(new THREE.ConeGeometry(0.3, 0.5, 3)), this.ringMat);
+    arrow.rotation.x = Math.PI / 2;
+    arrow.position.set(0, 0.04, r + 0.35);
+    this.root.add(arrow);
+    // shown while it is my target
+    this.picked = flat(new THREE.Mesh(own(new THREE.RingGeometry(r + 0.15, r + 0.45, 64)), this.pickMat), 0.025);
+    this.picked.visible = false;
+    // a glow while it casts
+    const glow = new THREE.Mesh(own(new THREE.SphereGeometry(1.25, 20, 14)), this.glowMat);
+    glow.position.y = 2.6;
+    this.root.add(glow);
 
-  return {
-    root,
-    dispose() {
-      ringGeo.dispose();
-      arrowGeo.dispose();
-      ringMat.dispose();
-      plate.remove();
-    },
-  };
+    this.hitbox = new THREE.Mesh(own(new THREE.CylinderGeometry(r * 0.6, r * 0.6, 4.2, 12)), new THREE.MeshBasicMaterial({ visible: false }));
+    this.hitbox.position.y = 2.1;
+    this.root.add(this.hitbox);
+
+    this.plate = document.createElement('div');
+    this.plate.className = 'nameplate boss';
+    this.plate.textContent = name;
+    const tag = new CSS2DObject(this.plate);
+    tag.position.set(0, 4.6, 0);
+    this.root.add(tag);
+  }
+
+  setTargeted(on: boolean): void {
+    this.picked.visible = on;
+  }
+
+  setCasting(on: boolean): void {
+    this.casting = on;
+  }
+
+  /** a small shake when something hits it */
+  hit(): void {
+    this.shake = 1;
+  }
+
+  update(x: number, z: number, f: number, dt: number, time: number): void {
+    this.root.position.set(x, 0, z);
+    this.root.rotation.y = f;
+    this.shake = Math.max(0, this.shake - dt * 6);
+    this.body.rotation.z = Math.sin(time * 60) * 0.03 * this.shake;
+    this.glow += ((this.casting ? 1 : 0) - this.glow) * Math.min(1, dt * 6);
+    this.glowMat.opacity = this.glow * (0.25 + Math.sin(time * 10) * 0.08);
+  }
+
+  dispose(): void {
+    for (const g of this.geos) g.dispose();
+    this.ringMat.dispose();
+    this.pickMat.dispose();
+    this.glowMat.dispose();
+    (this.hitbox.material as THREE.Material).dispose();
+    this.plate.remove();
+  }
 }

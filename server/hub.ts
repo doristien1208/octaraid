@@ -12,10 +12,11 @@ const RESUME_MS = 30_000; // how long a dropped player keeps their seat
 
 export const errorMsg = (code: string, msg: string): S2C => ({ t: 'error', code, msg });
 
-/** How long the vote result and the results screen stay up; the tests shorten them. */
+/** How long the vote result, the countdown and the results screen take; the tests shorten them. */
 export interface Timing {
   tallyMs: number;
   resultsMs: number;
+  countdownMs?: number;
 }
 
 export class Session {

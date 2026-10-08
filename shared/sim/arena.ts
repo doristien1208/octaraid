@@ -29,3 +29,22 @@ export function angleDiff(a: number, b: number): number {
   if (d <= -Math.PI) d += 2 * Math.PI;
   return d;
 }
+
+/** The facing that looks from (x0, z0) towards (x1, z1). */
+export function faceTowards(x0: number, z0: number, x1: number, z1: number): number {
+  return Math.atan2(x1 - x0, z1 - z0);
+}
+
+/** How far a point is from the edge of a target's ring (negative inside it). Ranges are measured this way. */
+export function reach(x: number, z: number, t: { x: number; z: number; r: number }): number {
+  return Math.hypot(t.x - x, t.z - z) - t.r;
+}
+
+/**
+ * Which side of an enemy a point is on, against the way it faces: the 90° behind it is the rear, the 90°
+ * on each side the flanks, the rest the front (positionals).
+ */
+export function sideOf(foe: { x: number; z: number; f: number }, x: number, z: number): 'front' | 'flank' | 'rear' {
+  const a = Math.abs(angleDiff(foe.f, Math.atan2(x - foe.x, z - foe.z)));
+  return a >= (Math.PI * 3) / 4 ? 'rear' : a > Math.PI / 4 ? 'flank' : 'front';
+}

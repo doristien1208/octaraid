@@ -6,8 +6,8 @@ import type { C2S, S2C } from '../shared/protocol';
 import { createApp } from '../server/app';
 
 let base = '';
-// the vote result and the results screen are shortened so the test does not wait 18 seconds
-const app = createApp(null, { tallyMs: 60, resultsMs: 300 });
+// the vote result, the countdown and the results screen are shortened so the test does not wait 28 seconds
+const app = createApp(null, { tallyMs: 60, resultsMs: 300, countdownMs: 300 });
 
 beforeAll(async () => {
   await new Promise<void>((resolve) => app.server.listen(0, '127.0.0.1', resolve));
@@ -157,6 +157,14 @@ describe('server', () => {
     alice.send({ t: 'mv', x: me.x + 0.3, z: me.z - 30, f: 0 });
     const fix = await alice.wait('pos');
     expect(Math.hypot(fix.x - me.x - 0.3, fix.z - me.z)).toBeLessThan(1.5);
+
+    // skills: one that goes off shows up in the snapshots; one that cannot gets a reason back
+    await alice.wait('snap', (m) => m.s.ph === 1);
+    alice.send({ t: 'use', s: 1 }); // the guardian's 挑釁, at the nearest enemy
+    const used = await bob.wait('snap', (m) => !!m.s.ev?.some((e) => e.k === 'use' && e.i === aw.id && e.s === 1));
+    expect(used.s.e[0]!.t).toBe(aw.id); // the dummy turns on whoever provoked it
+    alice.send({ t: 'use', s: 5 }); // the Limit Break with an empty gauge
+    expect(await alice.wait('deny')).toMatchObject({ s: 5, why: 'lb' });
 
     // only the host can end a test fight; results, then everyone is back in the waiting room
     bob.send({ t: 'endtest' });

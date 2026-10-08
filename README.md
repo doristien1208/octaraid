@@ -4,7 +4,7 @@ FF14 風格的 3D 網頁團隊討伐戰，給同事在公司區網一起玩：�
 
 企劃書：<https://claude.ai/code/artifact/dd4ddb06-eea7-4b00-b1e9-02e6bc31219c>
 
-目前進度：M1（專案骨架）完成——邀請碼房間、待機室（職業、投票、準備、聊天）、4 個副本的 3D 場地、移動與連線、離線練習。技能與戰鬥在 M2 加入；角色模型暫時用程式產生，CC0 素材下載後替換。
+目前進度：M2（戰鬥核心）完成——8 個職業的技能、GCD、冷卻、詠唱與滑步、仇恨、傷害與減傷、護盾、死亡與復活、極限技、缺角補正與超越之力，對手是會普攻、死刑與全場 AoE 的訓練木人；角色用 CC0 的 KayKit 模型（見 [CREDITS.md](CREDITS.md)）。Boss 機制與 4 個副本的 Boss 在 M3、M4 加入。
 
 ## 環境
 
@@ -30,10 +30,25 @@ npm start
 
 - `boss=0`–`3`：副本（0 崩岩巨像、1 霜冠魔女、2 發條城塞 1F、3 發條城塞 2F）
 - `hard`：Hard 難度
-- `n=1`–`8`：人數（其他角色由電腦隨意走動）
+- `n=1`–`8`：人數（其他職業由電腦隊友擔任，會自己走位、出招、補血與復活）
 - `job=`：你的職業（guardian、berserker、priest、warden、brawler、lancer、ranger、sorcerer）
+- `calm`：木人不攻擊，用來量輸出
+- `lb`：開戰時極限技量表就是滿的
+- `gallery`：8 個職業排成一排面向鏡頭，用來比對造型
 
-操作：W A S D 移動、滑鼠拖曳轉鏡頭、滾輪縮放、V 切換俯視、Enter 聊天、1–5 技能（M2 開放）、R 極限技（M2 開放）；技能、聊天、俯視等按鍵可在「設定」裡改。
+操作：
+
+| 動作 | 按鍵 |
+| --- | --- |
+| 移動 | W A S D、方向鍵（以鏡頭方向為準） |
+| 轉鏡頭 / 縮放 | 滑鼠拖曳 / 滾輪；V 切換俯視 |
+| 技能 1–5 | 1–5（按住 1 會一直接著打） |
+| 極限技 | R（量表滿時） |
+| 選敵人 | Tab、點木人 |
+| 選隊友 | F1–F8、點隊伍清單或角色；Esc 取消目標 |
+| 聊天 | Enter |
+
+技能、極限技、聊天、俯視等按鍵可在「設定」裡改；設定裡也能關掉「補師單體治療自動選人」。
 
 ## 開發
 
@@ -74,20 +89,26 @@ npm run typecheck
 
 | 想改的東西 | 檔案 |
 | --- | --- |
-| 移動速度、倒數、結算時間、聊天限制 | `shared/constants.ts` 的 `RULES` |
-| 職業、技能說明、極限技 | `shared/jobs.ts` |
-| 副本、場地大小、目標時長與狂暴時間 | `shared/encounters.ts` |
+| 移動速度、倒數、結算時間、聊天限制、GCD、暴擊、仇恨倍率、復活與衰弱、LB 累積 | `shared/constants.ts` 的 `RULES` |
+| 職業、技能的威力與效果、極限技（`fx` 與說明要一起改） | `shared/jobs.ts` |
+| 增益與減益的數值 | `shared/status.ts` |
+| 訓練木人的普攻、死刑與全場 AoE | `shared/sim/practice.ts` |
+| 副本、場地大小、目標時長、狂暴時間、Boss 血量 | `shared/encounters.ts` |
 | 職能上限、Boss 血量權重 | `shared/party.ts` |
 | 預設按鍵 | `client/keys.ts` |
-| 角色與場地的造型配色 | `client/game/models.ts`、`client/game/arena.ts` |
+| 職業的配色、武器與動作 | `client/game/look.ts` |
+| 場地造型 | `client/game/arena.ts` |
+
+改了數值就跑一次 `npm test`：`tests/balance.test.ts` 會讓電腦隊伍打每個副本的木人，印出各職業的每秒傷害並檢查通關時間。
 
 ## 專案結構
 
 ```text
-shared/   規則常數、職業、副本、投票、邀請碼、通訊協定、戰鬥模擬（前後端共用）
+shared/   規則常數、職業與技能、狀態、副本、投票、邀請碼、通訊協定、戰鬥模擬與電腦隊友（前後端共用）
 server/   HTTP + WebSocket、房間、待機室與戰鬥迴圈
-client/   介面、three.js 3D 畫面、程式產生的模型、音效
-tests/    規則、模擬、伺服器整合測試（Vitest）
+client/   介面、three.js 3D 畫面、角色造型與動作、特效、音效
+client/public/models/   CC0 角色、武器與動作（來源見 CREDITS.md）
+tests/    規則、戰鬥、平衡模擬、伺服器整合測試（Vitest）
 deploy/   測試機用的 bat 與部署說明
-scripts/  建置與打包
+scripts/  建置、打包、產生角色模型檔
 ```

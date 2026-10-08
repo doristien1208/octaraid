@@ -12,6 +12,7 @@ import {
   type Snapshot,
 } from '../shared/protocol';
 import { Fight } from '../shared/sim/fight';
+import { PRACTICE } from '../shared/sim/practice';
 import { tally, type Tally } from '../shared/vote';
 import { errorMsg, type Hub, type Session } from './hub';
 import { log } from './log';
@@ -32,6 +33,8 @@ export class Room {
   private info: GameStartInfo | null = null;
   private lastSnap: Snapshot | null = null;
   private lastTally: Tally | null = null;
+  /** 超越之力: wipes per Normal option since its last clear */
+  private readonly wipes = new Map<number, number>();
   private nextTickAt = 0;
   private timer: NodeJS.Timeout | null = null;
 
@@ -115,6 +118,12 @@ export class Room {
           if (fix) s.send({ t: 'pos', x: fix[0], z: fix[1] });
         }
         return;
+      case 'use':
+        if (this.phase === 'playing' && this.fight) {
+          const r = this.fight.use(s.id, msg.s, { target: msg.tg, dx: msg.dx, dz: msg.dz });
+          if (r !== 'ok' && r !== 'queued') s.send({ t: 'deny', s: msg.s, why: r });
+        }
+        return;
       case 'chat':
         return this.chat(m, msg.text);
       case 'job':
@@ -188,10 +197,17 @@ export class Room {
       hard: opt.hard,
       seed: Math.floor(Math.random() * 2 ** 31),
       hpScale: Math.round(hpScale(jobs) * 1000) / 1000,
+      echo: opt.hard ? 0 : (this.wipes.get(opt.index) ?? 0),
       players: this.members.map((x) => ({ id: x.s.id, name: x.s.name, job: x.job })),
+      foes: [{ id: 'boss', name: PRACTICE.name, r: PRACTICE.ring }],
     };
     this.info = info;
-    const fight = new Fight(encounterById(opt.enc), opt.hard, info.players, info.seed);
+    const countdownMs = this.hub.timing.countdownMs;
+    const fight = new Fight(encounterById(opt.enc), opt.hard, info.players, info.seed, {
+      hpScale: info.hpScale,
+      echo: info.echo,
+      countdown: countdownMs === undefined ? undefined : countdownMs / TICK_MS,
+    });
     for (const x of this.members) if (!x.s.online) fight.setConnected(x.s.id, false);
     this.fight = fight;
     this.phase = 'playing';
@@ -200,7 +216,7 @@ export class Room {
     this.broadcast({ t: 'start', game: info });
     const roster = this.members.map((x) => `${x.s.name}（${jobById(x.job).name}）`).join('、');
     log(
-      `房間 ${this.code} 出發：${optionLabel(this.lastTally.winner)}，${this.members.length} 人：${roster}；Boss 血量 ${Math.round(info.hpScale * 100)}%，種子 ${info.seed}`,
+      `房間 ${this.code} 出發：${optionLabel(this.lastTally.winner)}，${this.members.length} 人：${roster}；Boss 血量 ${Math.round(info.hpScale * 100)}%${info.echo ? `，超越之力 +${info.echo * 10}%` : ''}，種子 ${info.seed}`,
     );
     this.broadcastRoom();
   }
@@ -231,7 +247,19 @@ export class Room {
     const result = this.fight?.result;
     if (result) {
       this.broadcast({ t: 'end', result });
-      log(`房間 ${this.code} 結束：${END_NAMES[result.reason]}，戰鬥 ${clock(result.time)}`);
+      const opt = this.lastTally ? VOTE_OPTIONS[this.lastTally.winner] : undefined;
+      if (opt && !opt.hard) {
+        if (result.reason === 'clear') this.wipes.delete(opt.index);
+        else if (result.reason === 'wipe' || result.reason === 'enrage')
+          this.wipes.set(opt.index, Math.min(RULES.echoMax, (this.wipes.get(opt.index) ?? 0) + 1));
+      }
+      // average damage per job, for the M2 gate and later balancing
+      const secs = Math.max(1, result.time);
+      const lines = result.stats.map((st) => {
+        const p = this.info?.players.find((x) => x.id === st.id);
+        return `${p?.name ?? st.id}（${p ? jobById(p.job).name : '?'}）每秒 ${Math.round(st.dmg / secs)}、治療 ${Math.round(st.heal / secs)}、倒地 ${st.deaths}`;
+      });
+      log(`房間 ${this.code} 結束：${END_NAMES[result.reason]}，戰鬥 ${clock(result.time)}，Boss 剩 ${Math.round(result.bossHp * 100)}%；${lines.join('；')}`);
     }
     this.broadcastRoom();
     this.timer = setTimeout(() => this.backToWaiting(), this.hub.timing.resultsMs);

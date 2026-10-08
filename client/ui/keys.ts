@@ -65,6 +65,9 @@ export function keyEditor(): HTMLElement {
         null,
         fixed('移動', ['W A S D', '方向鍵']),
         fixed('轉鏡頭 / 縮放', ['滑鼠拖曳', '滾輪']),
+        fixed('選敵人', ['Tab', '點選']),
+        fixed('選隊友', ['F1–F8', '點隊伍清單']),
+        fixed('取消目標', ['Esc']),
         ...rows,
       ),
     );

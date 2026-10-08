@@ -242,7 +242,7 @@ export class RoomScreen {
           ),
         ),
       ),
-      h('p', { class: 'muted small' }, '技能在下一版（M2）開放，這一版先測試連線、移動與畫面。'),
+      h('p', { class: 'muted small' }, '這一版的對手是訓練木人：會普攻、死刑與全場 AoE，Boss 機制在下一階段（M3）加入。'),
     );
   }
 
