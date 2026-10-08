@@ -7,6 +7,8 @@ export interface ArenaView {
   group: THREE.Group;
   /** turned every frame so their letters read the right way up from wherever the camera is */
   waymarks: THREE.Mesh[];
+  /** pillars that have shattered (Hard 絕對零度) show as stumps */
+  setBroken(list: readonly number[]): void;
   dispose(): void;
 }
 
@@ -107,17 +109,6 @@ export function buildArena(enc: Encounter): ArenaView {
       break;
     }
     case 'frostwitch': {
-      // the 4 pillars that block the witch's line of sight (absolute zero) stand on the intercardinals
-      const pillar = own(new THREE.CylinderGeometry(1.0, 1.25, 6, 6));
-      const ice = mat('#a8e6ff', { transparent: true, opacity: 0.88, emissive: new THREE.Color('#5fc8ff'), emissiveIntensity: 0.25 });
-      for (const [x, z] of [
-        [1, -1],
-        [1, 1],
-        [-1, 1],
-        [-1, -1],
-      ] as const) {
-        add(pillar, ice, x * 13 * Math.SQRT1_2, 3, z * 13 * Math.SQRT1_2);
-      }
       const spike = own(new THREE.ConeGeometry(1, 4, 6));
       const snow = mat('#e3f5ff');
       for (let k = 0; k < 16; k++) {
@@ -162,9 +153,32 @@ export function buildArena(enc: Encounter): ArenaView {
     }
   }
 
+  // pillars (霜冠魔女: they hide players from 絕對零度; on Hard the ones used shatter to stumps)
+  const ice = mat('#a8e6ff', { transparent: true, opacity: 0.88, emissive: new THREE.Color('#5fc8ff'), emissiveIntensity: 0.25 });
+  const stump = mat('#7fa8c0');
+  const pillars = (a.pillars ?? []).map((p) => {
+    const g = new THREE.Group();
+    g.position.set(p.x, 0, p.z);
+    const whole = new THREE.Mesh(own(new THREE.CylinderGeometry(p.r * 0.85, p.r, 6, 6)), ice);
+    whole.position.y = 3;
+    const broken = new THREE.Mesh(own(new THREE.CylinderGeometry(p.r * 0.95, p.r, 1.1, 6)), stump);
+    broken.position.y = 0.55;
+    broken.visible = false;
+    g.add(whole, broken);
+    group.add(g);
+    return { whole, broken };
+  });
+
   return {
     group,
     waymarks,
+    setBroken(list: readonly number[]) {
+      pillars.forEach((p, k) => {
+        const gone = list.includes(k);
+        p.whole.visible = !gone;
+        p.broken.visible = gone;
+      });
+    },
     dispose() {
       for (const x of trash) x.dispose();
     },

@@ -8,7 +8,13 @@ export type EncounterId = 'colossus' | 'frostwitch' | 'gatekeeper' | 'twins';
 export interface Arena {
   shape: 'circle' | 'square';
   size: number;
+  /** pillars nobody can walk through; a boss cannot see past them (視線遮蔽) */
+  pillars?: readonly { x: number; z: number; r: number }[];
+  /** a square floor of `grid` × `grid` tiles that can be electrified */
+  grid?: number;
 }
+
+const DIAG = 13 * Math.SQRT1_2;
 
 export interface DifficultyTimes {
   /** the fight should usually end around here */
@@ -51,11 +57,21 @@ export const ENCOUNTERS: readonly Encounter[] = [
     name: '霜冠魔女',
     kind: 'trial',
     boss: '霜冠魔女',
-    arena: { shape: 'circle', size: 20 },
+    // the 4 ice pillars stand on the intercardinal waymarks 1–4
+    arena: {
+      shape: 'circle',
+      size: 20,
+      pillars: [
+        { x: DIAG, z: -DIAG, r: 1.3 },
+        { x: DIAG, z: DIAG, r: 1.3 },
+        { x: -DIAG, z: DIAG, r: 1.3 },
+        { x: -DIAG, z: -DIAG, r: 1.3 },
+      ],
+    },
     learn: '連線、踩塔、地火、躲柱子',
     desc: '冰湖上的浮空魔女，四個斜角各有一根可以遮蔽的冰柱。',
     times: { normal: { target: 300, enrage: 420 }, hard: { target: 390, enrage: 450 } },
-    hp: { normal: 880_000, hard: 1_300_000 },
+    hp: { normal: 800_000, hard: 950_000 },
     theme: { sky: '#b9dcf2', floor: '#d6ecf7', floorLine: '#8fbcd8', edge: '#6aa3c8', outside: '#e8f4fb' },
   },
   {
@@ -63,11 +79,11 @@ export const ENCOUNTERS: readonly Encounter[] = [
     name: '發條城塞 1F：守門機兵',
     kind: 'raid',
     boss: '守門機兵',
-    arena: { shape: 'square', size: 18 },
+    arena: { shape: 'square', size: 18, grid: 6 },
     learn: '換坦、計時炸彈、八方站位、地板',
     desc: '6 × 6 格的機械地板，格子會通電；四足機械守衛把守城門。',
     times: { normal: { target: 300, enrage: 420 }, hard: { target: 390, enrage: 450 } },
-    hp: { normal: 880_000, hard: 1_300_000 },
+    hp: { normal: 840_000, hard: 1_000_000 },
     theme: { sky: '#3b4255', floor: '#6c7486', floorLine: '#a8b0c2', edge: '#3a3f4d', outside: '#2a2e38' },
   },
   {
@@ -79,7 +95,7 @@ export const ENCOUNTERS: readonly Encounter[] = [
     learn: '雙王、血量分配、顏色機制、合體',
     desc: '紅色的熾核與藍色的凍核，兩王太靠近會共鳴；最後合體成雙極機神。',
     times: { normal: { target: 330, enrage: 450 }, hard: { target: 420, enrage: 480 } },
-    hp: { normal: 980_000, hard: 1_400_000 },
+    hp: { normal: 900_000, hard: 1_050_000 },
     theme: { sky: '#2b2440', floor: '#4b4466', floorLine: '#8e83b8', edge: '#2a2338', outside: '#1c1828' },
   },
 ];

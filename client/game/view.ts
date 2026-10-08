@@ -6,7 +6,7 @@ import { LB_SLOT, LIMIT_BREAKS, jobById, type Fx, type Job, type SkillInfo } fro
 import { FOES } from '../../shared/bosses/foes';
 import { DENY_TEXT, type C2S, type DenyReason, type FightEvent, type GameResult, type GameStartInfo, type SnapFoe, type SnapPlayer, type Snapshot } from '../../shared/protocol';
 import { angleDiff, clampToArena, faceTowards, reach } from '../../shared/sim/arena';
-import { STATUS_IDS } from '../../shared/status';
+import { STATUS, STATUS_IDS } from '../../shared/status';
 import type { Audio } from '../audio';
 import { h, store, toast } from '../dom';
 import { MOVE_KEYS, SKILL_ACTIONS, actionOf, loadBindings, type Bindings, type MoveKey } from '../keys';
@@ -59,7 +59,7 @@ export class GameView {
   private readonly arena: ArenaView;
   /** every enemy on screen by id: the boss, its adds, a prison */
   private readonly foes = new Map<string, { view: FoeView; kind: SnapFoe['kd'] }>();
-  private readonly teles = new Telegraphs();
+  private readonly teles: Telegraphs;
   private readonly effects = new Effects();
   private readonly enc: Encounter;
   private readonly myJob: Job;
@@ -123,6 +123,7 @@ export class GameView {
     this.scene.add(sun);
 
     this.arena = buildArena(this.enc);
+    this.teles = new Telegraphs(this.enc.arena);
     this.scene.add(this.arena.group);
     for (const f of info.foes) this.addFoe(f.id, f.kind);
     this.scene.add(this.teles.group);
@@ -215,6 +216,8 @@ export class GameView {
     }
     this.syncFoes(s);
     this.teles.update(s.tg, (id) => this.drawnAt(id), performance.now());
+    this.hud.freeze(this.teles.freezeLeft(s.tg));
+    this.arena.setBroken(s.pb ?? []);
     for (const e of s.ev ?? []) this.onEvent(e, s);
     const count = this.hud.onSnap(s, this.target, this.slotStates(s));
     if (count !== this.lastCount) {
@@ -226,7 +229,7 @@ export class GameView {
     if (full && !this.lbFull) this.audio.play('lbReady');
     this.lbFull = full;
     this.effects.setZones(
-      (s.zn ?? []).map((z) => ({ key: `${z.o}/${z.s}`, x: z.x, z: z.z, r: z.r, color: STATUS_IDS[z.s] === 'ley' ? '#ff6a3a' : '#9a8cff' })),
+      (s.zn ?? []).map((z) => ({ key: `${z.o}/${z.s}`, x: z.x, z: z.z, r: z.r, color: STATUS_IDS[z.s] === 'ley' ? '#ff5ad2' : '#8affc0' })),
     );
     // a target that is gone (a dead enemy, a boss between phases) is dropped
     if (this.isFoe(this.target) && !s.e.some((e) => e.i === this.target && hittable(e))) this.pick(null);
@@ -313,10 +316,10 @@ export class GameView {
     return !!id && (this.foes.has(id) || this.info.foes.some((f) => f.id === id));
   }
 
-  /** My character cannot move: a stun (岩牢) or a prison. */
+  /** My character cannot move: shut in a 岩牢, or frozen by 深度凍結. */
   private stunned(): boolean {
     const mine = this.last?.p.find((p) => p.i === this.meId);
-    return !!mine?.st?.some((x) => STATUS_IDS[x[0]] === 'stun');
+    return !!mine?.st?.some((x) => STATUS[STATUS_IDS[x[0]]!]?.stun);
   }
 
   private jobOf(id: string): Job | null {
@@ -447,14 +450,46 @@ export class GameView {
         }
         break;
       case 'adds':
-        this.hud.addChat('', '岩巨兵出現了');
+        this.hud.addChat('', '小怪出現了：坦克接住，其他人集火');
         break;
       case 'revive':
         this.effects.pillar(b.x, b.z, '#ff7a2c', 1.2, 0.8);
-        this.hud.addChat('', '岩巨兵又站起來了：要一起打倒');
+        this.hud.addChat('', `${this.names.get(e.i) ?? '小怪'}又站起來了：要一起打倒`);
+        break;
+      case 'bomb':
+        if (e.t) {
+          const at = this.where(e.t);
+          this.effects.wave(at.x, at.z, 8, '#c86bff', 0.6);
+          this.effects.burst(at.x, 1, at.z, 2, '#c86bff', 0.5);
+        }
+        break;
+      case 'charge':
+        f?.view.act('charge');
+        if (e.t) {
+          const at = this.where(e.t);
+          this.effects.line(b.x, b.z, faceTowards(b.x, b.z, at.x, at.z), this.enc.arena.size * 2, 6, '#ff6a3a');
+        }
+        break;
+      case 'glow':
+        // Hard 炎冰交錯 has no telegraph: the weapon of the one that strikes first lights up
+        f?.view.act('glow');
+        break;
+      case 'swap':
+        this.hud.announce('顏色互換！', 'bad');
+        this.audio.play('warn');
+        break;
+      case 'resonance':
+        this.hud.addChat('', '兩王靠得太近：共鳴，傷害提高');
+        for (const v of this.foes.values()) if (FOES[v.kind].boss) this.effects.wave(v.view.root.position.x, v.view.root.position.z, 6, '#ffffff', 0.5);
+        break;
+      case 'fuse':
+        this.hud.announce('合體：雙極機神', 'phase');
+        this.effects.pillar(b.x, b.z, '#ffffff', 2.5, 1.2);
+        this.effects.wave(b.x, b.z, 20, '#c86bff', 1);
         break;
     }
-    if (e.m !== 'auto' && e.m !== 'jump' && e.m !== 'adds' && (e.t === this.meId || e.m === 'raidwide')) this.audio.play('hurt');
+    if (e.m === 'raidwide' && e.n === '失衡') this.hud.addChat('', '兩王血量差太多：失衡，要平均打');
+    if (['buster', 'raidwide', 'prison', 'bomb', 'charge'].includes(e.m) && (e.t === this.meId || e.m === 'raidwide')) this.audio.play('hurt');
   }
 
   /** A skill went off: the caster's animation and the shape of what it did. */
@@ -515,6 +550,11 @@ export class GameView {
     if (this.isFoe(e.t)) {
       if (e.s) this.hud.addDealt(e.s, e.a);
       if (!e.dot) this.foes.get(e.t)?.view.hit();
+      if (e.iv) {
+        // a twin waiting at 30% for the other: hit the other one
+        if (e.s === this.meId) this.effects.text(at.x, 3.2, at.z, '無敵：先打另一隻', 'dealt small');
+        return;
+      }
       if (e.s === this.meId) {
         this.effects.text(at.x, 3.2, at.z, `${e.a.toLocaleString()}${e.c ? '!' : ''}`, `dealt ${e.c ? 'crit' : ''} ${e.dot ? 'small' : ''}`);
         if (e.pos !== undefined) this.effects.text(at.x, 3.9, at.z, e.pos ? '身位成功' : '身位失敗', e.pos ? 'pos' : 'pos miss');

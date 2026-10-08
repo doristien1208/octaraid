@@ -27,7 +27,13 @@ export type StatusId =
   | 'dmgDown'
   | 'vuln'
   | 'crack'
-  | 'stun';
+  | 'stun'
+  | 'frozen'
+  | 'bomb'
+  | 'red'
+  | 'blue'
+  | 'resonance'
+  | 'sealed';
 
 export interface StatusInfo {
   name: string;
@@ -98,6 +104,13 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   vuln: { name: '易傷', icon: '易', good: false, desc: '機制失誤（Hard）：受到的傷害每層 +50%，可疊', taken: 0.5 },
   crack: { name: '裂盾', icon: '裂', good: false, desc: '吃過死刑：受到的傷害 +100%，下一發換另一個坦克接', taken: 1 },
   stun: { name: '岩牢', icon: '牢', good: false, desc: '被岩石包住：不受傷害，但不能移動與行動；隊友要在時間內打破岩牢', stun: true, invuln: true },
+  // M4 (new ones go at the end: snapshots send the index)
+  frozen: { name: '凍結', icon: '凍', good: false, desc: '讀條結束時還在移動，被凍住：不能移動與行動', stun: true },
+  bomb: { name: '定時炸彈', icon: '爆', good: false, desc: '時間到就爆炸，波及身邊的隊友：快離開大家' },
+  red: { name: '熾焰印記', icon: '炎', good: false, desc: '紅色：只能進紅色的分攤' },
+  blue: { name: '凍氣印記', icon: '冰', good: false, desc: '藍色：只能進藍色的分攤' },
+  resonance: { name: '共鳴', icon: '鳴', good: true, desc: '兩王相距太近：造成的傷害每層 +10%' },
+  sealed: { name: '待合體', icon: '封', good: true, desc: '血量降到 30%：不再受傷，等另一隻也到 30% 就合體' },
 };
 
 export const STATUS_IDS = Object.keys(STATUS) as StatusId[];

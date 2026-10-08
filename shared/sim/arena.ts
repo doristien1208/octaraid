@@ -6,13 +6,26 @@ import type { Arena } from '../encounters';
  * points along (sin f, cos f), so f = π faces north.
  */
 
-/** Pulls (x, z) back inside the walkable area: the arena minus the player's radius. */
+/** Pulls (x, z) back inside the walkable area: the arena minus the player's radius, outside its pillars. */
 export function clampToArena(a: Arena, x: number, z: number, r: number = RULES.playerRadius): [number, number] {
   const lim = a.size - r;
-  if (a.shape === 'square') return [Math.max(-lim, Math.min(lim, x)), Math.max(-lim, Math.min(lim, z))];
-  const d = Math.hypot(x, z);
-  if (d <= lim) return [x, z];
-  return [(x / d) * lim, (z / d) * lim];
+  let out: [number, number];
+  if (a.shape === 'square') out = [Math.max(-lim, Math.min(lim, x)), Math.max(-lim, Math.min(lim, z))];
+  else {
+    const d = Math.hypot(x, z);
+    out = d <= lim ? [x, z] : [(x / d) * lim, (z / d) * lim];
+  }
+  for (const p of a.pillars ?? []) {
+    const dx = out[0] - p.x;
+    const dz = out[1] - p.z;
+    const d = Math.hypot(dx, dz);
+    const min = p.r + r;
+    if (d >= min) continue;
+    // step out the way it came in (straight out from the middle when on the axis)
+    const [ux, uz] = d > 1e-6 ? [dx / d, dz / d] : [p.x / Math.hypot(p.x, p.z), p.z / Math.hypot(p.x, p.z)];
+    out = [p.x + ux * min, p.z + uz * min];
+  }
+  return out;
 }
 
 /** Where the party stands when the fight loads: a row south of the boss, facing it. */

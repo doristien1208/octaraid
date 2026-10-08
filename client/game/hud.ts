@@ -47,6 +47,8 @@ function statusIcons(list: SnapStatus[] | undefined, max: number, big = false): 
         { class: `st ${info.good ? 'good' : 'bad'} ${big ? 'big' : ''}`, title: `${info.name}：${info.desc}` },
         h('b', null, info.icon),
         big && left >= 0 ? h('small', null, secs(left)) : info.shield && big ? h('small', null, String(v)) : null,
+        // stacks (易傷, the twins' 共鳴)
+        (info.taken === 0.5 || info.name === '共鳴') && v > 1 ? h('em', null, `×${v}`) : null,
       ),
     );
 }
@@ -74,11 +76,11 @@ export class Hud {
   private readonly help = h('span');
   private readonly fps = h('span', { class: 'fps' });
   private readonly endBtn: HTMLButtonElement;
-  private readonly bossHp = h('i');
-  private readonly bossHpText = h('span');
-  private readonly bossCast = h('div', { class: 'cast-bar boss' });
   private readonly bossBox: HTMLElement;
-  private readonly bossName = h('span');
+  /** one bar per boss on screen (two for the twins until they merge) */
+  private readonly bossList = h('div', { class: 'boss-list' });
+  private readonly bossBars = new Map<string, { el: HTMLElement; hp: HTMLElement; text: HTMLElement; cast: HTMLElement; st: HTMLElement }>();
+  private readonly freezeWarn = h('div', { class: 'hud-freeze' });
   /** what kind of move each enemy is casting (from the cast events): the cast bar's colour */
   private readonly castKinds = new Map<string, Extract<FightEvent, { k: 'bcast' }>['m']>();
   private readonly lbFlash = h('div', { class: 'lb-flash' });
@@ -155,7 +157,6 @@ export class Hud {
       this.lbFlash,
     );
     const boss = info.foes.find((f) => FOES[f.kind].boss) ?? info.foes[0];
-    this.bossName.textContent = boss?.name ?? enc.boss;
     const note = info.echo
       ? `超越之力 +${info.echo * 10}%`
       : boss?.kind === 'dummy'
@@ -164,9 +165,8 @@ export class Hud {
     this.bossBox = h(
       'div',
       { class: 'hud-boss' },
-      h('div', { class: 'boss-name' }, this.bossName, h('span', { class: `diff ${info.hard ? 'hard' : ''}` }, `${enc.name === this.bossName.textContent ? '' : `${enc.name} `}${difficultyName(info.hard)}`)),
-      h('div', { class: 'bar boss-hp' }, this.bossHp, this.bossHpText),
-      this.bossCast,
+      h('div', { class: 'boss-title' }, h('span', { class: `diff ${info.hard ? 'hard' : ''}` }, `${enc.name} ${difficultyName(info.hard)}`)),
+      this.bossList,
       note ? h('div', { class: 'boss-note' }, note) : null,
     );
 
@@ -189,6 +189,7 @@ export class Hud {
         ),
       ),
       this.center,
+      this.freezeWarn,
       this.banner,
       h('div', { class: 'hud-right' }, this.chatBox, h('details', { class: 'hud-meter', open: true }, h('summary', null, '每秒傷害'), this.meter)),
       h(
@@ -256,6 +257,12 @@ export class Hud {
   /** An enemy started a cast: tank busters show red, raid-wides purple, the enrage dark red. */
   castKind(id: string, m: Extract<FightEvent, { k: 'bcast' }>['m']): void {
     this.castKinds.set(id, m);
+  }
+
+  /** The freeze check (深度凍結): a warning in the middle of the screen until it ends (ms left, or null). */
+  freeze(left: number | null): void {
+    this.freezeWarn.classList.toggle('show', left !== null);
+    if (left !== null) this.freezeWarn.textContent = left > 1500 ? `讀條結束時不要移動 ${(left / 1000).toFixed(1)}` : `停！ ${(left / 1000).toFixed(1)}`;
   }
 
   /** A line over the LB gauge for a moment (a mechanic done without a mistake). */
@@ -331,15 +338,34 @@ export class Hud {
       }
     }
 
-    // the boss
-    const boss = s.e.find((e) => FOES[e.kd].boss) ?? s.e[0];
-    if (boss) {
-      this.bossHp.style.width = pct(boss.hp / boss.mh);
-      this.bossHpText.textContent = boss.u ? `${pct(boss.hp / boss.mh)}（無法選取）` : `${pct(boss.hp / boss.mh)}`;
-      this.bossBox.classList.toggle('dim', boss.u === 1);
-      this.castBar(this.bossCast, boss.c ? { name: boss.c[0], left: boss.c[1], total: boss.c[2] } : null);
-      this.bossCast.dataset.m = boss.c ? (this.castKinds.get(boss.i) ?? 'mech') : '';
+    // the bosses: one bar each (the twins side by side), with what they cast and their own statuses
+    const bosses = s.e.filter((e) => FOES[e.kd].boss && !(e.g && e.hp > 0));
+    const boss = bosses[0] ?? s.e[0];
+    for (const e of bosses) {
+      let bar = this.bossBars.get(e.i);
+      if (!bar) {
+        const hp = h('i');
+        const text = h('span');
+        const cast = h('div', { class: 'cast-bar boss' });
+        const st = h('div', { class: 'boss-st' });
+        const el = h('div', { class: `boss-row ${e.kd}` }, h('div', { class: 'boss-name' }, FOES[e.kd].name, st), h('div', { class: 'bar boss-hp' }, hp, text), cast);
+        bar = { el, hp, text, cast, st };
+        this.bossBars.set(e.i, bar);
+        this.bossList.append(el);
+      }
+      bar.hp.style.width = pct(e.hp / e.mh);
+      bar.text.textContent = e.u ? `${pct(e.hp / e.mh)}（無法選取）` : pct(e.hp / e.mh);
+      bar.el.classList.toggle('dim', e.u === 1);
+      this.castBar(bar.cast, e.c ? { name: e.c[0], left: e.c[1], total: e.c[2] } : null);
+      bar.cast.dataset.m = e.c ? (this.castKinds.get(e.i) ?? 'mech') : '';
+      paint(bar.st, stKey(e.st, false), () => statusIcons(e.st, 4));
     }
+    for (const [id, bar] of this.bossBars) {
+      if (bosses.some((e) => e.i === id)) continue;
+      bar.el.remove();
+      this.bossBars.delete(id);
+    }
+    this.bossList.classList.toggle('two', this.bossBars.size > 1);
 
     // the party; the enmity rank follows my target (or the boss)
     const ranks = (s.e.find((e) => e.i === target) ?? boss)?.ag ?? [];

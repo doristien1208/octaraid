@@ -1,5 +1,5 @@
 /** Shown on the entry screen and in /healthz, so a deployment can be checked at a glance. */
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 /** The test machine gives this game port 3100; the Game Hub passes it in PORT as well. */
 export const DEFAULT_PORT = 3100;
@@ -51,7 +51,10 @@ export const RULES = {
   variance: 0.05,
   critRate: 0.1,
   critMul: 1.5,
-  enmityTank: 3,
+  /** tank stance: a tank's damage makes this much more enmity (×3 in v0.3.0 was too easy to lose) */
+  enmityTank: 6,
+  /** what tanks start with on every enemy's list, so DPS openers do not pull the boss off them */
+  enmityTankStart: 2000,
   /** healing makes this much enmity, split across all enemies */
   enmityHeal: 0.5,
   /** provoke: top of the list, this far ahead of the next one */
@@ -80,4 +83,9 @@ export const RULES = {
   // 超越之力 (Normal only): per wipe on the same duty in the same room
   echoStep: 0.1,
   echoMax: 3,
+  // enemies that walk (M4): they follow the top of their enmity list, so a tank can drag them around
+  /** an enemy's auto attack reaches this far beyond its ring; when its target is further it walks after it */
+  bossReach: 2,
+  /** and stops this close */
+  bossStop: 1.5,
 } as const;

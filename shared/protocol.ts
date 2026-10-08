@@ -1,4 +1,5 @@
 import type { FoeKind } from './bosses/foes';
+import type { TeleColor } from './sim/mech';
 import type { EncounterId } from './encounters';
 import type { JobId, Role } from './jobs';
 import type { Tally } from './vote';
@@ -96,19 +97,27 @@ export interface SnapFoe {
 /**
  * A boss attack's ground telegraph (or a marker over a head) while it is coming. Shapes:
  * ['c', x, z, r] circle, ['d', x, z, r0, r1] donut, ['f', x, z, facing, r, degrees] fan,
- * ['l', x, z, facing, length, width] strip, ['m'] marker only, ['k', x, z, distance] knockback.
- * Colours: o orange ground damage, y yellow stack, p purple spread, r red buster or death, w white knockback.
+ * ['l', x, z, facing, length, width] strip, ['m'] marker only, ['k', x, z, distance] knockback,
+ * ['h', x, z, facing] half of the arena, ['g', n, cells] live floor tiles ('1' row by row from the north-west),
+ * ['s', x, z, pillars] line of sight from (x, z): pillars '1101' standing ones hide, ['T', x, z, r, need] tower,
+ * ['b', other, distance] tether from `o` to `other`, ['B', r] timed bomb on `o`, ['n', k] number k over `o`,
+ * ['x'] freeze check for everyone.
+ * A circle with `o` sits on that player; a fan or strip with `o` turns from (x, z) to point at them.
+ * Colours: o orange ground damage, y yellow stack or tower, p purple spread or pool, r red buster or death,
+ * w white knockback, b blue tether, c cyan freeze, s green safe spot, e fire, i ice.
  */
 export interface SnapTele {
   i: number;
-  c: 'o' | 'y' | 'p' | 'r' | 'w';
+  c: TeleColor;
   s: (string | number)[];
-  /** sits on this player (spreads, stacks, buster markers) */
+  /** sits on this player (spreads, stacks, buster markers), or what a fan or strip points at */
   o?: string;
   n: number; // ticks shown in all
   l: number; // ticks left
   /** e.g. how many people a stack wants */
   x?: string;
+  /** a pool on the floor: it hurts all the while, not only when it runs out */
+  z?: 1;
 }
 
 /** A circle on the ground from a skill (星界領域, 魔力湧泉). */
@@ -137,8 +146,17 @@ export type FightEvent =
   | { k: 'raise'; i: string; by: string | null }
   /** a Limit Break went off */
   | { k: 'lb'; i: string; r: Role }
-  /** an enemy move went off: auto attack, tank buster, raid-wide, the leap, a prison, adds, an add getting up */
-  | { k: 'boss'; i: string; n: string; m: 'auto' | 'buster' | 'raidwide' | 'jump' | 'prison' | 'adds' | 'revive'; t?: string }
+  /**
+   * an enemy move went off: auto attack, tank buster, raid-wide, a leap, a prison, adds, an add getting up,
+   * a bomb, a charge, which twin goes first (glow), the colours flipping, the twins resonating or merging
+   */
+  | {
+      k: 'boss';
+      i: string;
+      n: string;
+      m: 'auto' | 'buster' | 'raidwide' | 'jump' | 'prison' | 'adds' | 'revive' | 'bomb' | 'charge' | 'glow' | 'swap' | 'resonance' | 'fuse';
+      t?: string;
+    }
   /** a boss started casting a named move that takes d ticks */
   | { k: 'bcast'; i: string; n: string; m: 'buster' | 'raidwide' | 'mech' | 'enrage'; t?: string; d: number }
   /** a new phase (u: the boss cannot be hit during it) */
@@ -164,6 +182,8 @@ export interface Snapshot {
   e: SnapFoe[];
   zn?: SnapZone[];
   tg?: SnapTele[];
+  /** the arena's pillars that have shattered */
+  pb?: number[];
   ev?: FightEvent[];
 }
 

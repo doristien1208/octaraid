@@ -40,6 +40,8 @@ describe('party', () => {
     const solo = partyNotes(['sorcerer']);
     expect(solo.some((n) => n.startsWith('沒有坦克'))).toBe(true);
     expect(solo.some((n) => n.startsWith('沒有補師'))).toBe(true);
-    expect(partyNotes(['guardian', 'berserker', 'warden'])).toEqual([]);
+    expect(solo.some((n) => n.startsWith('只有 1 人'))).toBe(true);
+    expect(partyNotes(['guardian', 'berserker', 'warden', 'ranger'])).toEqual([]);
+    expect(partyNotes(['guardian', 'berserker', 'warden'])).toEqual(['沒有 DPS：雙子機神要平均打兩隻王，只有坦克與補師很難不失衡']);
   });
 });

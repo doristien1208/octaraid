@@ -4,7 +4,7 @@ FF14 風格的 3D 網頁團隊討伐戰，給同事在公司區網一起玩：�
 
 企劃書：<https://claude.ai/code/artifact/dd4ddb06-eea7-4b00-b1e9-02e6bc31219c>
 
-目前進度：M3 完成——第一個 Boss「崩岩巨像」（Normal / Hard，三個階段，中間要先打倒兩隻岩巨兵），以及共用的機制引擎：時間軸、地面預兆（圓形、月環、扇形、直線、分散、分攤、擊退、死刑標記）、岩牢、小怪、失誤懲罰與零失誤的極限技加成。戰鬥核心（M2）：8 個職業的技能、GCD、冷卻、詠唱與滑步、仇恨、傷害與減傷、護盾、死亡與復活、極限技、缺角補正與超越之力。其他三個副本在 M4 加入，這一版還是訓練木人。角色用 CC0 的 KayKit 模型（見 [CREDITS.md](CREDITS.md)）。
+目前進度：M4 完成——四個副本都有 Boss：崩岩巨像、霜冠魔女（連線、踩塔、地火、躲冰柱、冰鏡分身）、發條城塞 1F 守門機兵（八方雷射、計時炸彈、地板通電、旋轉光束、僚機）、2F 雙子機神（兩隻王的共鳴、失衡與合體、半場刀、衝撞、雙色分攤）。從 M4 起王會走向仇恨第一的人，坦克要把王拖到位置（崩岩巨像不動）；坦克仇恨 ×6。共用的機制引擎：時間軸、地面預兆、頭上標記、小怪、失誤懲罰與零失誤的極限技加成。戰鬥核心（M2）：8 個職業的技能、GCD、冷卻、詠唱與滑步、仇恨、傷害與減傷、護盾、死亡與復活、極限技、缺角補正與超越之力。角色用 CC0 的 KayKit 模型（見 [CREDITS.md](CREDITS.md)）。
 
 ## 環境
 
@@ -47,7 +47,7 @@ npm start
 | 轉鏡頭 / 縮放 | 滑鼠拖曳 / 滾輪；V 切換俯視 |
 | 技能 1–5 | 1–5（按住 1 會一直接著打） |
 | 極限技 | R（量表滿時） |
-| 選敵人 | Tab（再按換下一個）、點敵人 |
+| 選敵人 | Tab（再按換下一個，兩隻王時輪流）、點敵人 |
 | 選隊友 | F1–F8、點隊伍清單或角色；Esc 取消目標 |
 | 聊天 | Enter |
 
@@ -95,9 +95,11 @@ npm run typecheck
 | 移動速度、倒數、結算時間、聊天限制、GCD、暴擊、仇恨倍率、復活與衰弱、LB 累積 | `shared/constants.ts` 的 `RULES` |
 | 職業、技能的威力與效果、極限技（`fx` 與說明要一起改） | `shared/jobs.ts` |
 | 增益與減益的數值 | `shared/status.ts` |
-| Boss 的時間軸、招式、傷害與階段 | `shared/bosses/colossus.ts` |
+| Boss 的時間軸、招式、傷害與階段 | `shared/bosses/`（`colossus.ts`、`frostwitch.ts`、`gatekeeper.ts`、`twins.ts`） |
 | 敵人的名稱、目標圈大小與移動速度 | `shared/bosses/foes.ts` |
-| 機制怎麼判定（形狀、分攤、擊退、岩牢、小怪） | `shared/sim/boss.ts`、`shared/sim/mech.ts` |
+| 機制怎麼判定（形狀、分攤、擊退、塔、連線、柱子、炸彈、雙王……） | `shared/sim/boss.ts`、`shared/sim/mech.ts` |
+| 場地的柱子與地板格 | `shared/encounters.ts` 的 `arena` |
+| 坦克仇恨倍率、王走路的距離 | `shared/constants.ts` 的 `RULES`（`enmityTank`、`bossReach`） |
 | 失誤懲罰、零失誤的極限技加成 | `shared/constants.ts` 的 `RULES` |
 | 訓練木人的普攻、死刑與全場 AoE | `shared/sim/practice.ts` |
 | 副本、場地大小、目標時長、狂暴時間、Boss 血量 | `shared/encounters.ts` |
@@ -106,7 +108,7 @@ npm run typecheck
 | 職業的配色、武器與動作 | `client/game/look.ts` |
 | 場地造型 | `client/game/arena.ts` |
 
-改了數值就跑一次 `npm test`：`tests/colossus.test.ts` 讓 1–8 人的電腦隊伍打崩岩巨像 Normal 與 Hard（看得懂預兆、會走位），檢查通關率與時間；`tests/balance.test.ts` 讓電腦隊伍打還是木人的副本，印出各職業的每秒傷害。
+改了數值就跑一次 `npm test`：`tests/colossus.test.ts` 與 `tests/m4.test.ts` 讓電腦隊伍（看得懂預兆、會走位、會拖王）打四個副本的 Normal 與 Hard，檢查通關率與時間；`tests/mechanics.test.ts`、`tests/mechanics4.test.ts` 逐一檢查每種機制；`tests/balance.test.ts` 印出各職業打木人的每秒傷害。
 
 ## 專案結構
 

@@ -243,7 +243,15 @@ export class RoomScreen {
           ),
         ),
       ),
-      h('p', { class: 'muted small' }, `已完成的 Boss：${ENCOUNTERS.filter((e) => hasBoss(e.id)).map((e) => e.boss).join('、')}；其他副本這一版還是訓練木人（會普攻、死刑與全場 AoE），之後陸續加入。`),
+      ...(ENCOUNTERS.some((e) => !hasBoss(e.id))
+        ? [
+            h(
+              'p',
+              { class: 'muted small' },
+              `還沒有 Boss 的副本：${ENCOUNTERS.filter((e) => !hasBoss(e.id)).map((e) => e.name).join('、')}（這一版由訓練木人代打，會普攻、死刑與全場 AoE）。`,
+            ),
+          ]
+        : []),
     );
   }
 

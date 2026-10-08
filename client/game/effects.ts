@@ -25,7 +25,10 @@ const UP = new THREE.Vector3(0, 1, 0);
 export class Effects {
   readonly group = new THREE.Group();
   private items: Item[] = [];
-  private readonly zones = new Map<string, { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; geo: THREE.BufferGeometry; seen: boolean }>();
+  private readonly zones = new Map<
+    string,
+    { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; dashes: THREE.Group; geos: THREE.BufferGeometry[]; mats: THREE.Material[]; seen: boolean }
+  >();
   private readonly unitCircle = new THREE.CircleGeometry(1, 48);
   private readonly unitRing = new THREE.RingGeometry(0.92, 1, 48);
   private readonly unitSphere = new THREE.SphereGeometry(1, 16, 12);
@@ -310,19 +313,36 @@ export class Effects {
   // ------------------------------------------------------------------ zones
 
   /** The lasting circles from the snapshot; key = owner + status. */
+  /**
+   * Circles players put on the ground (星界領域, 魔力湧泉). They are drawn as magic circles — a faint fill
+   * inside a turning ring of dashes — so they never read as a boss attack (a full, filling shape).
+   */
   setZones(list: readonly { key: string; x: number; z: number; r: number; color: string }[]): void {
     for (const z of this.zones.values()) z.seen = false;
     for (const s of list) {
       let z = this.zones.get(s.key);
       if (!z) {
-        const geo = new THREE.RingGeometry(0, 1, 48);
-        const mat = this.mat(s.color, 0.22, false);
-        const mesh = new THREE.Mesh(geo, mat);
+        const geos: THREE.BufferGeometry[] = [];
+        const mats: THREE.Material[] = [];
+        const own = <T extends THREE.BufferGeometry>(g: T) => (geos.push(g), g);
+        const mat = this.mat(s.color, 0.1, false);
+        mats.push(mat);
+        const mesh = new THREE.Mesh(own(new THREE.CircleGeometry(1, 48)), mat);
         mesh.rotation.x = -Math.PI / 2;
-        const rim = new THREE.Mesh(this.unitRing, this.mat(s.color, 0.7, false));
-        mesh.add(rim);
+        const rimMat = this.mat(s.color, 0.85, false);
+        mats.push(rimMat);
+        const dashes = new THREE.Group();
+        const dash = own(new THREE.RingGeometry(0.93, 1, 6, 1, 0, (Math.PI * 2) / 24));
+        for (let k = 0; k < 12; k++) {
+          const d = new THREE.Mesh(dash, rimMat);
+          d.rotation.z = (k * Math.PI * 2) / 12;
+          dashes.add(d);
+        }
+        mesh.add(dashes);
+        const inner = new THREE.Mesh(own(new THREE.RingGeometry(0.62, 0.65, 48)), rimMat);
+        mesh.add(inner);
         this.group.add(mesh);
-        z = { mesh, mat, geo, seen: true };
+        z = { mesh, mat, dashes, geos, mats, seen: true };
         this.zones.set(s.key, z);
       }
       z.seen = true;
@@ -332,15 +352,17 @@ export class Effects {
     for (const [key, z] of this.zones) {
       if (z.seen) continue;
       this.group.remove(z.mesh);
-      z.geo.dispose();
-      z.mat.dispose();
-      ((z.mesh.children[0] as THREE.Mesh).material as THREE.Material).dispose();
+      for (const g of z.geos) g.dispose();
+      for (const m of z.mats) m.dispose();
       this.zones.delete(key);
     }
   }
 
   update(dt: number, time: number): void {
-    for (const z of this.zones.values()) z.mat.opacity = 0.18 + Math.sin(time * 3) * 0.05;
+    for (const z of this.zones.values()) {
+      z.mat.opacity = 0.1 + Math.sin(time * 3) * 0.04;
+      z.dashes.rotation.z = time * 0.6;
+    }
     const keep: Item[] = [];
     for (const it of this.items) {
       it.t += dt;

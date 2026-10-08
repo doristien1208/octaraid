@@ -125,6 +125,12 @@ export interface Foe {
   /** dead or removed: kept a moment so clients can show it go */
   gone?: boolean;
   goneAt?: number;
+  /** leaping or charging somewhere: its script moves it, nothing else happens meanwhile */
+  dash: { x0: number; z0: number; x1: number; z1: number; t0: number; t1: number } | null;
+  /** takes no enmity: never targets anyone, moves only when its script says (凍核) */
+  aloof?: boolean;
+  /** HP cannot drop below this (a twin waiting for the other at 30%) */
+  minHp?: number;
 }
 
 export interface Zone {
@@ -183,6 +189,8 @@ export class Fight {
   readonly hpScale: number;
   /** the boss script at work, or null for the training dummy */
   readonly brain: BossBrain | null = null;
+  /** the arena's pillars that have shattered (Hard 絕對零度): they no longer hide anyone */
+  readonly pillarsBroken: boolean[];
   private readonly rng: Rng;
   private foeSeq = 0;
   private events: FightEvent[] = [];
@@ -197,6 +205,7 @@ export class Fight {
     opts: FightOptions = {},
   ) {
     this.rng = new Rng(seed);
+    this.pillarsBroken = (enc.arena.pillars ?? []).map(() => false);
     if (opts.countdown !== undefined) this.countdown = Math.max(1, Math.round(opts.countdown));
     this.echo = hard ? 0 : Math.max(0, Math.min(RULES.echoMax, Math.floor(opts.echo ?? 0)));
     this.calm = !!opts.calm;
@@ -316,11 +325,13 @@ export class Fight {
   end(reason: EndReason): void {
     if (this.phase === 'over') return;
     this.phase = 'over';
-    const boss = this.foes.find((f) => f.boss);
+    // the twins count together until they merge
+    const bosses = this.foes.filter((f) => f.boss && !f.gone);
+    const max = bosses.reduce((n, f) => n + f.maxHp, 0);
     this.result = {
       reason,
       time: Math.round(this.fightTicks / TICK_RATE),
-      bossHp: boss ? Math.round((boss.hp / boss.maxHp) * 1000) / 1000 : 0,
+      bossHp: max ? Math.round((bosses.reduce((n, f) => n + f.hp, 0) / max) * 1000) / 1000 : 0,
       stats: [...this.players.values()].map((p) => ({ ...p.stats, dmg: Math.round(p.stats.dmg), heal: Math.round(p.stats.heal), taken: Math.round(p.stats.taken) })),
     };
   }
@@ -352,7 +363,7 @@ export class Fight {
       if (foe.gone && this.tick >= (foe.goneAt ?? 0)) this.foes.splice(k, 1);
     }
 
-    const boss = this.foes.find((f) => f.boss);
+    const boss = this.brain?.foe ?? this.foes.find((f) => f.boss);
     if (boss && boss.hp <= 0) this.end('clear');
     else if (this.players.size && [...this.players.values()].every((p) => p.dead)) this.end('wipe');
     else if (this.fightTicks >= this.enrageTicks) this.end('enrage');
@@ -362,7 +373,7 @@ export class Fight {
   private pull(): void {
     this.phase = 'fight';
     for (const foe of this.foes) {
-      for (const p of this.players.values()) foe.enmity.set(p.id, p.role === 'tank' ? 10 : 0);
+      for (const p of this.players.values()) foe.enmity.set(p.id, p.role === 'tank' ? RULES.enmityTankStart : 0);
       foe.autoAt = this.tick + sec(PRACTICE.autoEvery);
     }
   }
@@ -722,7 +733,11 @@ export class Fight {
 
   private dealFoe(p: Fighter, e: Foe, amount: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean; crit?: boolean }): void {
     if (!this.hittable(e)) return;
-    const dealt = Math.min(e.hp, amount);
+    if (e.minHp !== undefined && e.hp <= e.minHp) {
+      this.emit({ k: 'dmg', s: p.id, t: e.id, a: 0, iv: 1, sk: slot });
+      return;
+    }
+    const dealt = Math.min(e.hp - (e.minHp ?? 0), amount);
     e.hp -= dealt;
     p.stats.dmg += dealt;
     if (!p.dead) e.enmity.set(p.id, (e.enmity.get(p.id) ?? 0) + dealt * (p.role === 'tank' ? RULES.enmityTank : 1) * (opts.enmity ?? 1));
@@ -737,6 +752,9 @@ export class Fight {
    */
   hurt(q: Fighter, raw: number, src: Foe | null): number {
     if (q.dead) return 0;
+    // 共鳴: a twin standing too close to the other hits harder, 10% a stack
+    const res = src?.statuses.find((s) => s.id === 'resonance');
+    if (res) raw *= 1 + 0.1 * res.v;
     if (q.statuses.some((s) => STATUS[s.id].invuln)) {
       this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: 0, iv: 1 });
       return 0;
@@ -825,8 +843,9 @@ export class Fight {
       untargetable: false,
       lockUntil: 0,
       owner: opts.owner,
+      dash: null,
     };
-    if (this.phase === 'fight') for (const p of this.players.values()) if (!p.dead) foe.enmity.set(p.id, p.role === 'tank' ? 10 : 0);
+    if (this.phase === 'fight') for (const p of this.players.values()) if (!p.dead) foe.enmity.set(p.id, p.role === 'tank' ? RULES.enmityTankStart : 0);
     this.foes.push(foe);
     this.emit({ k: 'spawn', i: foe.id });
     return foe;
@@ -994,35 +1013,52 @@ export class Fight {
       if (foe.kind === 'prison') this.despawn(foe);
       return;
     }
-    const top = foe.untargetable ? null : this.topOf(foe);
+    const top = foe.untargetable || foe.aloof ? null : this.topOf(foe);
     foe.target = top?.id ?? null;
-    if (top && this.tick >= foe.lockUntil) {
-      const turn = angleDiff(foe.f, faceTowards(foe.x, foe.z, top.x, top.z));
-      const max = 6 / TICK_RATE;
-      foe.f += Math.max(-max, Math.min(max, turn));
-    }
-    if (top && foe.speed > 0) {
-      // walk up to its target
-      const d = Math.hypot(top.x - foe.x, top.z - foe.z) - foe.r - 0.8;
-      if (d > 0) {
-        const step = Math.min(d, foe.speed / TICK_RATE);
-        const len = Math.hypot(top.x - foe.x, top.z - foe.z) || 1;
-        foe.x += ((top.x - foe.x) / len) * step;
-        foe.z += ((top.z - foe.z) / len) * step;
+    if (foe.dash) this.foeDash(foe);
+    else {
+      if (top && this.tick >= foe.lockUntil) {
+        const turn = angleDiff(foe.f, faceTowards(foe.x, foe.z, top.x, top.z));
+        const max = 6 / TICK_RATE;
+        foe.f += Math.max(-max, Math.min(max, turn));
+      }
+      // walk after its target when it is out of reach (not while casting or aiming): this is how a
+      // tank drags a boss where the party wants it
+      if (top && foe.speed > 0 && !foe.cast && this.tick >= foe.lockUntil) {
+        const dist = Math.hypot(top.x - foe.x, top.z - foe.z);
+        if (dist - foe.r > RULES.bossReach) {
+          const step = Math.min(dist - foe.r - RULES.bossStop, foe.speed / TICK_RATE);
+          [foe.x, foe.z] = clampToArena(this.enc.arena, foe.x + ((top.x - foe.x) / dist) * step, foe.z + ((top.z - foe.z) / dist) * step, 1);
+        }
       }
     }
-    if (this.brain?.foe === foe) {
-      this.brain.step();
-      if (foe.cast && this.tick >= foe.cast.end) foe.cast = null;
-    } else if (foe.kind === 'dummy') {
+    if (this.brain?.foe === foe) this.brain.step();
+    else if (foe.kind === 'dummy') {
       this.practiceStep(foe, top);
       return;
     }
-    if (top && foe.auto > 0 && !foe.cast && this.tick >= foe.autoAt) {
+    if (foe.cast && this.tick >= foe.cast.end) foe.cast = null;
+    // a walking enemy only hits what it reaches; one that stays put reaches anywhere
+    const reaches = !!top && (foe.speed === 0 || Math.hypot(top.x - foe.x, top.z - foe.z) - foe.r <= RULES.bossReach + 1);
+    if (top && reaches && foe.auto > 0 && !foe.cast && !foe.dash && this.tick >= foe.autoAt) {
       foe.autoAt = this.tick + sec(3);
       this.emit({ k: 'boss', i: foe.id, n: '攻擊', m: 'auto', t: top.id });
       this.hurt(top, foe.auto * (this.roles.tank ? 1 : RULES.noTankDamage), foe);
     }
+  }
+
+  private foeDash(foe: Foe): void {
+    const d = foe.dash!;
+    const k = Math.min(1, (this.tick - d.t0) / Math.max(1, d.t1 - d.t0));
+    foe.x = d.x0 + (d.x1 - d.x0) * k;
+    foe.z = d.z0 + (d.z1 - d.z0) * k;
+    if (k >= 1) foe.dash = null;
+  }
+
+  /** An enemy leaps or charges to (x, z) over `ticks` (its script decides; clients see it travel). */
+  leapFoe(foe: Foe, x: number, z: number, ticks: number): void {
+    foe.dash = { x0: foe.x, z0: foe.z, x1: x, z1: z, t0: this.tick, t1: this.tick + Math.max(1, ticks) };
+    if (Math.hypot(x - foe.x, z - foe.z) > 0.1) foe.f = faceTowards(foe.x, foe.z, x, z);
   }
 
   /** The training dummy (M2): autos, a tank buster and a raid-wide on a loop (practice.ts). */
@@ -1132,21 +1168,56 @@ export class Fight {
     if (!b) return undefined;
     const list = b.visible();
     if (!list.length) return undefined;
+    const pillars = this.enc.arena.pillars ?? [];
     return list.map((t) => {
       const s = t.shape;
-      const shape: (string | number)[] =
-        s.k === 'circle'
-          ? ['c', r2(s.x), r2(s.z), s.r]
-          : s.k === 'donut'
-            ? ['d', r2(s.x), r2(s.z), s.r0, r2(s.r1)]
-            : s.k === 'cone'
-              ? ['f', r2(s.x), r2(s.z), r2(s.f), r2(s.r), s.deg]
-              : s.k === 'rect'
-                ? ['l', r2(s.x), r2(s.z), r2(s.f), r2(s.len), s.w]
-                : s.k === 'push'
-                  ? ['k', r2(s.x), r2(s.z), s.dist]
-                  : ['m'];
-      return { i: t.id, c: t.color, s: shape, o: b.holder(t)?.id, n: t.end - t.start, l: t.end - this.tick, x: t.text };
+      let shape: (string | number)[];
+      switch (s.k) {
+        case 'circle':
+          shape = ['c', r2(s.x), r2(s.z), s.r];
+          break;
+        case 'donut':
+          shape = ['d', r2(s.x), r2(s.z), s.r0, r2(s.r1)];
+          break;
+        case 'cone':
+          shape = ['f', r2(s.x), r2(s.z), r2(s.f), r2(s.r), r2(s.deg)];
+          break;
+        case 'rect':
+          shape = ['l', r2(s.x), r2(s.z), r2(s.f), r2(s.len), s.w];
+          break;
+        case 'push':
+          shape = ['k', r2(s.x), r2(s.z), s.dist];
+          break;
+        case 'half':
+          shape = ['h', r2(s.x), r2(s.z), r2(s.f)];
+          break;
+        case 'tiles':
+          shape = ['g', s.n, s.cells];
+          break;
+        case 'los':
+          shape = ['s', r2(s.x), r2(s.z), pillars.map((p) => (s.pillars.includes(p) && !this.pillarsBroken[pillars.indexOf(p)] ? '1' : '0')).join('')];
+          break;
+        case 'tower':
+          shape = ['T', r2(s.x), r2(s.z), s.r, s.need];
+          break;
+        case 'tether':
+          shape = ['b', s.b, s.dist];
+          break;
+        case 'bomb':
+          shape = ['B', s.r];
+          break;
+        case 'num':
+          shape = ['n', s.n];
+          break;
+        case 'stop':
+          shape = ['x'];
+          break;
+        case 'mark':
+          shape = ['m'];
+          break;
+      }
+      const o = t.aim ?? b.holder(t)?.id;
+      return { i: t.id, c: t.color, s: shape, o, n: t.end - t.start, l: t.end - this.tick, x: t.text, z: t.zone ? 1 : undefined };
     });
   }
 
@@ -1202,6 +1273,7 @@ export class Fight {
         ? this.zones.map((z) => ({ s: STATUS_INDEX.get(z.s)!, o: z.owner, x: r2(z.x), z: r2(z.z), r: z.r, l: z.until - t }))
         : undefined,
       tg: this.telegraphs(),
+      pb: this.pillarsBroken.some((x) => x) ? this.pillarsBroken.flatMap((x, k) => (x ? [k] : [])) : undefined,
       ev: ev.length ? ev : undefined,
     };
   }
