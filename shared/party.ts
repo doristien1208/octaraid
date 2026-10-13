@@ -1,4 +1,4 @@
-import { jobById, type JobId, type Role } from './jobs';
+import { DEFAULT_JOB_ORDER, jobById, type JobId, type Role } from './jobs';
 
 /** At most 2 tanks, 2 healers and 4 DPS; the same job may be taken twice within those limits. */
 export const ROLE_CAPS: Readonly<Record<Role, number>> = { tank: 2, healer: 2, dps: 4 };
@@ -27,6 +27,20 @@ export function hpScale(jobs: readonly JobId[]): number {
 export function roleHasRoom(others: readonly JobId[], job: JobId): boolean {
   const role = jobById(job).role;
   return roleCounts(others)[role] < ROLE_CAPS[role];
+}
+
+/**
+ * The offline practice party: my job, then computer players the way a room hands out jobs (one of each
+ * role first, then the next free job), within the role caps.
+ */
+export function practiceParty(myJob: JobId, n: number): JobId[] {
+  const jobs: JobId[] = [myJob];
+  while (jobs.length < n) {
+    const next = DEFAULT_JOB_ORDER.find((j) => !jobs.includes(j) && roleHasRoom(jobs, j)) ?? DEFAULT_JOB_ORDER.find((j) => roleHasRoom(jobs, j));
+    if (!next) break;
+    jobs.push(next);
+  }
+  return jobs;
 }
 
 /** What the missing-role rules (缺角補正) will do for this party, for the waiting room. */

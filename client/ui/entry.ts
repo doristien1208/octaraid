@@ -19,6 +19,7 @@ export function entryScreen(opts: {
   code?: string;
   onCreate(name: string): void;
   onJoin(name: string, code: string): void;
+  onPractice(): void;
 }): EntryScreen {
   const name = h('input', {
     class: 'input big',
@@ -85,7 +86,7 @@ export function entryScreen(opts: {
         'div',
         { class: 'entry-tools' },
         h('button', { class: 'btn ghost small', onclick: () => settingsModal(opts.audio) }, '設定與按鍵'),
-        h('a', { class: 'btn ghost small', href: '?sandbox' }, '離線練習'),
+        h('button', { class: 'btn ghost small', onclick: opts.onPractice }, '離線練習'),
       ),
       h('p', { class: 'hint small' }, `v${VERSION}`),
     ),

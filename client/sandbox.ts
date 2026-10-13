@@ -1,7 +1,7 @@
 import { TICK_MS, TICK_RATE } from '../shared/constants';
 import { ENCOUNTERS } from '../shared/encounters';
 import { DEFAULT_JOB_ORDER, isJobId, jobById, type JobId } from '../shared/jobs';
-import { hpScale, roleHasRoom } from '../shared/party';
+import { hpScale, practiceParty } from '../shared/party';
 import type { C2S, GameStartInfo } from '../shared/protocol';
 import { Bot, spotFor } from '../shared/sim/bot';
 import { Fight } from '../shared/sim/fight';
@@ -11,6 +11,7 @@ import { GameView } from './game/view';
 
 /**
  * Offline practice, no room needed: ?sandbox&boss=0..3&hard&n=1..8&job=guardian&dummy&calm&lb&skip=90&until=岩牢
+ * (the entry screen's 離線練習 opens the menu in ui/practice.ts, which builds this address).
  * The fight runs in this browser with the same rules as the server. Computer players fill the rest of
  * the party (role caps apply), read the boss's attacks and play their rotations. dummy: the training
  * dummy instead of the duty's boss; calm: a dummy that does not attack, for measuring damage; lb: the
@@ -34,13 +35,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   const n = gallery ? 8 : int('n', 1, 8, 4);
   const jobParam = q.get('job');
   const myJob: JobId = isJobId(jobParam) ? jobParam : 'guardian';
-  // fill the party the way a room hands out jobs: one of each role first, within the role caps
-  const jobs: JobId[] = gallery ? [myJob, ...DEFAULT_JOB_ORDER.filter((j) => j !== myJob)] : [myJob];
-  while (jobs.length < n) {
-    const next = DEFAULT_JOB_ORDER.find((j) => !jobs.includes(j) && roleHasRoom(jobs, j)) ?? DEFAULT_JOB_ORDER.find((j) => roleHasRoom(jobs, j));
-    if (!next) break;
-    jobs.push(next);
-  }
+  const jobs: JobId[] = gallery ? [myJob, ...DEFAULT_JOB_ORDER.filter((j) => j !== myJob)] : practiceParty(myJob, n);
   const roster = jobs.map((job, k) => (k === 0 ? { id: 'me', name: store.get('octaraid.name') || '你', job } : { id: `bot${k}`, name: `電腦${k}`, job }));
   const seed = Math.floor(Math.random() * 2 ** 31);
   const scale = hpScale(jobs);
@@ -95,7 +90,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
     },
     leave() {
       window.clearInterval(timer);
-      location.href = location.pathname;
+      location.href = `${location.pathname}?practice`;
     },
   };
   const game = new GameView(info, 'me', link, audio);
@@ -121,8 +116,10 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
     game.onSnap(fight.snapshot());
     if (fight.phase === 'over' && fight.result) {
       window.clearInterval(timer);
-      game.onEnd(fight.result);
-      window.setTimeout(() => location.reload(), 8000); // start another round
+      game.onEnd(fight.result, [
+        { label: '再打一次', primary: true, onClick: () => location.reload() },
+        { label: '換關卡', onClick: () => link.leave() },
+      ]);
     }
   }, TICK_MS);
 }

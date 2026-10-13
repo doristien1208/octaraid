@@ -53,6 +53,13 @@ function statusIcons(list: SnapStatus[] | undefined, max: number, big = false): 
     );
 }
 
+/** A button on the results card. */
+export interface ResultAction {
+  label: string;
+  primary?: boolean;
+  onClick(): void;
+}
+
 /**
  * The fight HUD, laid out as in the design doc: my statuses and the party list on the left, the boss bar
  * with its cast bar on top, my target top right, chat on the right, my HP, cast bar, hotbar and the LB
@@ -495,7 +502,8 @@ export class Hud {
     this.fps.textContent = `${fps} fps`;
   }
 
-  showResults(result: GameResult): void {
+  /** The results card; `actions` (offline practice) replace the note about going back to the waiting room. */
+  showResults(result: GameResult, actions?: readonly ResultAction[]): void {
     this.results?.remove();
     const secsIn = Math.max(1, result.time);
     const rows = [...result.stats].sort((a, b) => b.dmg - a.dmg);
@@ -530,7 +538,13 @@ export class Hud {
             }),
           ),
         ),
-        h('p', { class: 'muted small' }, '稍後自動回到待機室'),
+        actions
+          ? h(
+              'div',
+              { class: 'results-actions' },
+              ...actions.map((x) => h('button', { class: `btn${x.primary ? ' primary' : ''}`, onclick: x.onClick }, x.label)),
+            )
+          : h('p', { class: 'muted small' }, '稍後自動回到待機室'),
       ),
     );
     this.el.append(this.results);

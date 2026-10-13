@@ -7,6 +7,7 @@ import { GameView } from './game/view';
 import { Net, TOKEN_KEY } from './net';
 import { startSandbox } from './sandbox';
 import { entryScreen, type EntryScreen } from './ui/entry';
+import { practiceScreen } from './ui/practice';
 import { RoomScreen } from './ui/room';
 
 const app = document.getElementById('app')!;
@@ -61,8 +62,25 @@ function showEntry(): void {
     code: urlCode(),
     onCreate: (name) => act({ t: 'create', name }),
     onJoin: (name, code) => act({ t: 'join', code, name }),
+    onPractice: showPractice,
   });
   show(entry.el);
+}
+
+/** The offline practice menu (?practice keeps it on a refresh); it starts the fight at ?sandbox&… */
+function showPractice(): void {
+  const code = urlCode(); // an invite link's code is still there when they come back
+  history.replaceState(null, '', `${location.pathname}?practice`);
+  show(
+    practiceScreen({
+      audio,
+      name: store.get('octaraid.name') ?? '',
+      onBack: () => {
+        setUrlCode(code ?? null);
+        showEntry();
+      },
+    }),
+  );
 }
 
 function act(msg: Extract<C2S, { t: 'create' | 'join' }>): void {
@@ -156,7 +174,9 @@ try {
 // the character models load in the background while people sit in the waiting room
 void loadModels();
 const savedName = store.get('octaraid.name');
-if (new URLSearchParams(location.search).has('sandbox')) startSandbox(app, audio);
+const params = new URLSearchParams(location.search);
+if (params.has('sandbox')) startSandbox(app, audio);
+else if (params.has('practice')) showPractice();
 else if (resumable && savedName) {
   show(h('div', { class: 'screen center' }, h('p', { class: 'muted light' }, '連線中…')));
   net.connect(savedName);

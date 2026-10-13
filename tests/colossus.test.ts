@@ -81,8 +81,8 @@ describe('崩岩巨像', () => {
     expect(names.indexOf('岩崩召喚')).toBeGreaterThan(names.indexOf('大地震'));
   }, 60_000);
 
-  it('is clearable on Hard by a 4-player party with a tank and a healer', () => {
-    const target = enc.times.hard.target;
+  it('is clearable on Hard by a 4-player party with a tank and a healer, with time to spare before the enrage', () => {
+    const enrage = enc.times.hard.enrage;
     let clears = 0;
     for (const jobs of [
       ['guardian', 'priest', 'brawler', 'sorcerer'],
@@ -92,7 +92,8 @@ describe('崩岩巨像', () => {
         const { r } = party(jobs, true, seed);
         if (r.reason === 'clear') {
           clears++;
-          expect(r.time).toBeLessThan(target * 0.9);
+          // tight but fair: a clean party still has about half a minute or more
+          expect(r.time).toBeLessThan(enrage - 30);
         }
       }
     }

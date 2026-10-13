@@ -2026,3 +2026,63 @@ p {
 .st {
   position: relative;
 }
+
+/* ------------------------------------------------------------ offline practice menu */
+
+.practice-title {
+  font-size: 18px;
+  color: #4a2f86;
+  white-space: nowrap;
+}
+
+.practice-body {
+  display: grid;
+  grid-template-columns: minmax(400px, 1.15fr) minmax(360px, 1fr) minmax(280px, 0.8fr);
+  align-items: start;
+  gap: 14px;
+  padding: 14px 20px 20px;
+}
+
+.seg.fill {
+  display: flex;
+}
+
+.seg.fill button {
+  flex: 1;
+  padding: 6px 4px;
+}
+
+.practice-party {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.practice-party .member {
+  padding: 4px 10px;
+}
+
+.practice-summary {
+  font-weight: 800;
+  color: var(--primary-dark);
+}
+
+@media (max-width: 1180px) {
+  .practice-body {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .practice-body {
+    grid-template-columns: 1fr;
+    padding: 14px 16px 20px;
+  }
+}
+
+.results-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 6px;
+}

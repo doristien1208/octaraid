@@ -17,7 +17,7 @@ import { Avatar } from './avatar';
 import { makeFoe, type FoeView } from './bosses';
 import { CameraRig } from './camera';
 import { Effects } from './effects';
-import { Hud, type SlotState } from './hud';
+import { Hud, type ResultAction, type SlotState } from './hud';
 import { Playback } from './playback';
 import { Telegraphs } from './telegraphs';
 
@@ -251,10 +251,10 @@ export class GameView {
     this.audio.play('deny');
   }
 
-  onEnd(result: GameResult): void {
+  onEnd(result: GameResult, actions?: readonly ResultAction[]): void {
     this.over = true;
     this.held.clear();
-    this.hud.showResults(result);
+    this.hud.showResults(result, actions);
     this.audio.play(result.reason === 'clear' ? 'win' : result.reason === 'test' ? 'chime' : 'lose');
     if (result.reason === 'clear') for (const [id, a] of this.avatars) if (!this.last?.p.find((p) => p.i === id)?.d) a.cheer();
   }
