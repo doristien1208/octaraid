@@ -400,7 +400,10 @@ export class BossBrain {
     if (!due.length) return;
     this.pending = this.pending.filter((p) => p.at > t);
     for (const p of due) {
+      // damage events carry the move's name for the combat log
+      this.fight.hitName = p.group.name;
       p.run();
+      this.fight.hitName = null;
       p.group.left--;
       if (p.group.left === 0 && p.group.scored && !p.group.failed) {
         this.fight.lb = Math.min(100, this.fight.lb + RULES.lbClean);
@@ -1295,7 +1298,9 @@ export class BossBrain {
     if (f.tick >= this.addsDeadline) {
       for (const a of alive) {
         this.fight.emit({ k: 'boss', i: a.id, n: '自爆', m: 'raidwide' });
+        f.hitName = '自爆';
         for (const q of f.living()) f.hurt(q, this.addsBoom, a);
+        f.hitName = null;
         a.hp = 0;
         f.despawn(a);
       }
@@ -1367,7 +1372,9 @@ export class BossBrain {
         if (!inside(p.tele.shape, q.x, q.z)) continue;
         if (f.tick - (p.hit.get(q.id) ?? -999) < sec(1)) continue;
         p.hit.set(q.id, f.tick);
+        f.hitName = p.group.name;
         f.hurt(q, p.dmg, null);
+        f.hitName = null;
         if (!p.missed.has(q.id)) {
           p.missed.add(q.id);
           f.fail(q, p.group.name);
@@ -1400,7 +1407,9 @@ export class BossBrain {
     if (since > 0 && since % sec(rules.imbalance.every) === 0 && gap > rules.imbalance.gap) {
       const src = a.hp / a.maxHp > tw.hp / tw.maxHp ? a : tw;
       f.emit({ k: 'boss', i: src.id, n: '失衡', m: 'raidwide' });
+      f.hitName = '失衡';
       for (const q of f.living()) f.hurt(q, rules.imbalance.dmg, src);
+      f.hitName = null;
     }
     // the first one down to the threshold waits, unhurt; both there: they merge
     for (const e of [a, tw]) {

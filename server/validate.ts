@@ -67,6 +67,10 @@ export function parseC2S(raw: string): C2S | null {
     }
     case 'endtest':
       return { t: 'endtest' };
+    case 'again':
+      return { t: 'again' };
+    case 'back':
+      return { t: 'back' };
     case 'ping': {
       if (typeof m.c !== 'number' || !Number.isFinite(m.c)) return null;
       const r = typeof m.r === 'number' && Number.isFinite(m.r) ? Math.max(0, Math.min(9999, Math.round(m.r))) : undefined;

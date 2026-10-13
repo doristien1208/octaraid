@@ -140,8 +140,9 @@ export type FightEvent =
   | { k: 'intr'; i: string }
   /** damage: s = source (null: the boss or the fight), a = HP lost, ab = absorbed by shields, iv = invulnerable, c = critical,
    * sk = the skill slot it came from, pos = 1 positional hit / 0 missed */
-  | { k: 'dmg'; s: string | null; t: string; a: number; ab?: number; iv?: 1; c?: 1; sk?: number; pos?: 0 | 1; dot?: 1 }
-  | { k: 'heal'; s: string | null; t: string; a: number; c?: 1; hot?: 1 }
+  /** c: critical hit, dh: direct hit; n: the enemy move that did it (for the combat log) */
+  | { k: 'dmg'; s: string | null; t: string; a: number; ab?: number; iv?: 1; c?: 1; dh?: 1; sk?: number; pos?: 0 | 1; dot?: 1; n?: string }
+  | { k: 'heal'; s: string | null; t: string; a: number; c?: 1; hot?: 1; sk?: number }
   | { k: 'die'; i: string }
   | { k: 'raise'; i: string; by: string | null }
   /** a Limit Break went off */
@@ -240,6 +241,9 @@ export type C2S =
   /** a skill (0–4) or the Limit Break (5); tg: the chosen target; dx, dz: the direction I am moving */
   | { t: 'use'; s: number; tg?: string | null; dx?: number; dz?: number }
   | { t: 'endtest' }
+  /** the host, on the results: the same duty again with the same party, or back to the waiting room */
+  | { t: 'again' }
+  | { t: 'back' }
   | { t: 'ping'; c: number; r?: number };
 
 export type S2C =

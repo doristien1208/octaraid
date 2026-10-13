@@ -73,6 +73,8 @@ export interface StatusInfo {
   stun?: boolean;
   /** given by a ground zone while standing in it (not shown with seconds) */
   zone?: boolean;
+  /** a zone that heals whoever stands in it this much a second */
+  zoneHot?: number;
   /** goes away when the owner uses any action */
   breakOnAction?: boolean;
 }
@@ -86,7 +88,7 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   regen: { name: '光環禱言', icon: '環', good: true, desc: '每秒回復 HP', hot: true },
   starShield: { name: '星盾', icon: '星', good: true, desc: '吸收傷害的護盾', shield: true },
   starVeil: { name: '群星庇護', icon: '庇', good: true, desc: '吸收傷害的護盾', shield: true },
-  sanctuary: { name: '星界領域', icon: '域', good: true, desc: '站在領域內：受到的傷害 −10%，每秒回復 150', mit: 0.1, zone: true },
+  sanctuary: { name: '星界領域', icon: '域', good: true, desc: '站在領域內：受到的傷害 −15%，每秒回復 250', mit: 0.15, zone: true, zoneHot: 250 },
   fury: { name: '疾風之心', icon: '風', good: true, desc: '傷害 +15%，GCD 變 2.0 秒', dmg: 0.15, gcd: 2 },
   battleCry: { name: '戰意昂揚', icon: '昂', good: true, desc: '傷害 +10%', dmg: 0.1 },
   bleed: { name: '裂鱗刺', icon: '刺', good: false, desc: '每秒受到持續傷害', dot: true },

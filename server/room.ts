@@ -144,6 +144,12 @@ export class Room {
       case 'endtest':
         if (m === this.host && this.phase === 'playing') this.fight?.end('test');
         return;
+      case 'again':
+        if (m === this.host && this.phase === 'results') this.again();
+        return;
+      case 'back':
+        if (m === this.host && this.phase === 'results') this.backToWaiting();
+        return;
     }
   }
 
@@ -265,7 +271,18 @@ export class Room {
     this.timer = setTimeout(() => this.backToWaiting(), this.hub.timing.resultsMs);
   }
 
+  /** 直接重來: the same option, the same party, no vote (超越之力 counts the wipe as usual). */
+  private again(): void {
+    if (!this.lastTally) return this.backToWaiting();
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.system(`房主選擇直接重來：${optionLabel(this.lastTally.winner)}`);
+    this.phase = 'tally';
+    this.begin();
+  }
+
   private backToWaiting(): void {
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.fight = null;
     this.info = null;

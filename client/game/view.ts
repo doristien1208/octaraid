@@ -65,6 +65,8 @@ export class GameView {
   private readonly myJob: Job;
   private readonly avatars = new Map<string, Avatar>();
   private readonly names = new Map<string, string>();
+  /** the last thing that hit each player, for 倒下了（…）in the combat log */
+  private readonly lastHit = new Map<string, string>();
   private readonly snaps: Snapshot[] = [];
   private readonly playback = new Playback();
   private readonly held = new Set<MoveKey>();
@@ -347,6 +349,11 @@ export class GameView {
         if (!e.hot) this.effects.sparkle(at.x, at.z, '#7dff9a', 7);
         if (e.t === this.meId || e.s === this.meId) this.effects.text(at.x, 2.1, at.z, `+${e.a.toLocaleString()}${e.c ? '!' : ''}`, `heal ${e.c ? 'crit' : ''} ${e.hot ? 'small' : ''}`);
         if (e.s === this.meId && !e.hot) this.audio.play('heal');
+        // heals I give or get, not the ticks of heal-over-time (too many lines)
+        if (!e.hot && e.s && (e.t === this.meId || e.s === this.meId)) {
+          const skill = this.skillName(e.s, e.sk);
+          this.hud.logCombat('heal', `${this.who(e.s)}${skill ? `的「${skill}」` : ''} → ${this.who(e.t)} +${e.a.toLocaleString()}${e.c ? '（暴擊）' : ''}`);
+        }
         return;
       }
       case 'die': {
@@ -358,6 +365,8 @@ export class GameView {
         }
         const name = this.names.get(e.i);
         if (name) this.hud.addChat('', `${name} 倒地`);
+        const cause = this.lastHit.get(e.i);
+        this.hud.logCombat('death', `${this.who(e.i)} 倒下了${cause ? `（${cause}）` : ''}`);
         return;
       }
       case 'raise': {
@@ -367,12 +376,14 @@ export class GameView {
         if (e.i === this.meId) this.audio.play('raise');
         const name = this.names.get(e.i);
         if (name) this.hud.addChat('', e.by ? `${name} 被 ${this.names.get(e.by) ?? ''} 復活` : `${name} 自己站了起來`);
+        this.hud.logCombat('info', e.by ? `${this.who(e.i)} 被 ${this.who(e.by)} 復活` : `${this.who(e.i)} 自己站了起來`);
         return;
       }
       case 'lb':
         return this.onLimitBreak(e.i, e.r, s);
       case 'bcast': {
         this.hud.castKind(e.i, e.m);
+        this.hud.logCombat('cast', `${this.who(e.i)} 開始詠唱「${e.n}」`);
         this.audio.play('warn');
         // the boss scripts mark their busters with a telegraph; the training dummy has none
         if (e.m === 'buster' && e.t && this.foes.get(e.i)?.kind === 'dummy') {
@@ -387,12 +398,14 @@ export class GameView {
       case 'phase': {
         // the first phase starts with the fight: no banner for it
         if (s.el > TICK_RATE) this.hud.announce(e.u ? `${e.n}：先打倒小怪` : e.n, 'phase');
+        this.hud.logCombat('info', `── ${e.n} ──`);
         if (e.u) this.audio.play('warn');
         return;
       }
       case 'fail': {
         const at = this.where(e.i);
         this.effects.text(at.x, 2.9, at.z, `失誤：${e.n}`, 'fail');
+        this.hud.logCombat('fail', `${this.who(e.i)} 失誤：${e.n}`);
         if (e.i === this.meId) this.audio.play('deny');
         return;
       }
@@ -405,6 +418,7 @@ export class GameView {
         return;
       }
       case 'fell': {
+        this.hud.logCombat('death', `${this.who(e.i)} 掉下懸崖`);
         const name = this.names.get(e.i);
         if (name) this.hud.addChat('', `${name} 掉下懸崖`);
         if (e.i === this.meId) this.hud.announce('掉下懸崖了：等待補師復活', 'bad');
@@ -556,8 +570,13 @@ export class GameView {
         return;
       }
       if (e.s === this.meId) {
-        this.effects.text(at.x, 3.2, at.z, `${e.a.toLocaleString()}${e.c ? '!' : ''}`, `dealt ${e.c ? 'crit' : ''} ${e.dot ? 'small' : ''}`);
+        // a critical hit ends in !, a direct hit says so, both: !!
+        const text = `${e.dh ? '直擊 ' : ''}${e.a.toLocaleString()}${e.c ? (e.dh ? '!!' : '!') : ''}`;
+        this.effects.text(at.x, 3.2, at.z, text, `dealt ${e.c ? 'crit' : ''} ${e.dh ? 'dh' : ''} ${e.dot ? 'small' : ''}`);
         if (e.pos !== undefined) this.effects.text(at.x, 3.9, at.z, e.pos ? '身位成功' : '身位失敗', e.pos ? 'pos' : 'pos miss');
+        const how = [e.c ? '暴擊' : '', e.dh ? '直擊' : ''].filter(Boolean).join('、');
+        const skill = e.dot ? '持續傷害' : `「${this.skillName(this.meId, e.sk)}」`;
+        this.hud.logCombat('dealt', `你的${skill} → ${this.who(e.t)} ${e.a.toLocaleString()}${how ? `（${how}）` : ''}`);
       }
       if (e.sk === LB_SLOT) this.effects.ring(at.x, at.z, RULES.lbDpsRadius, '#ff4d6d', 1);
       return;
@@ -566,11 +585,34 @@ export class GameView {
       const text = e.iv ? '無敵' : e.a === 0 && e.ab ? `吸收 ${e.ab.toLocaleString()}` : `-${e.a.toLocaleString()}`;
       if (e.t === this.meId) this.effects.text(at.x, 2.2, at.z, text, 'taken');
     }
+    // the combat log: who took what from which move
+    const src = e.s ? this.who(e.s) : '';
+    const what = e.n ? `${src}「${e.n}」` : src ? `${src}的攻擊` : '傷害';
+    this.lastHit.set(e.t, what);
+    const line = e.iv
+      ? `${this.who(e.t)} 受到 ${what}：無敵，沒有受傷`
+      : `${this.who(e.t)} 受到 ${what} ${e.a.toLocaleString()} 點傷害${e.ab ? `（護盾吸收 ${e.ab.toLocaleString()}）` : ''}`;
+    this.hud.logCombat('taken', line, e.t === this.meId);
     if (e.a >= 3000) this.avatars.get(e.t)?.hurt();
+  }
+
+  /** Who it is, for the combat log: 你 for me. */
+  private who(id: string | null | undefined): string {
+    if (!id) return '';
+    return id === this.meId ? '你' : (this.names.get(id) ?? '?');
+  }
+
+  /** A player's skill by hotbar slot (the Limit Break by their role). */
+  private skillName(id: string, sk: number | undefined): string {
+    const p = this.info.players.find((x) => x.id === id);
+    if (!p || sk === undefined) return '';
+    const job = jobById(p.job);
+    return sk === LB_SLOT ? LIMIT_BREAKS[job.role].name : (job.skills[sk]?.name ?? '');
   }
 
   private onLimitBreak(id: string, role: 'tank' | 'healer' | 'dps', s: Snapshot): void {
     this.avatars.get(id)?.playLimitBreak(role);
+    this.hud.logCombat('info', `${this.who(id)} 發動極限技「${LIMIT_BREAKS[role].name}」`);
     const name = this.names.get(id) ?? '';
     this.hud.announce(`${name}：${LIMIT_BREAKS[role].name}`, `lb ${role}`);
     this.audio.play('lb');

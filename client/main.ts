@@ -124,7 +124,10 @@ net.onMessage = (m: S2C) => {
       room.update(m.room);
       if (m.room.phase === 'waiting' && game) endGame();
       game?.setHost(isHost(m.room));
-      if (!game) show(room.el);
+      if (!game && app.firstElementChild !== room.el) {
+        show(room.el);
+        room.onShow(); // the chat kept its lines during the fight: show the newest
+      }
       break;
     case 'chat':
       room?.addChat(m.name, m.text);
@@ -149,7 +152,11 @@ net.onMessage = (m: S2C) => {
       game?.onDeny(m.s, m.why);
       break;
     case 'end':
-      game?.onEnd(m.result);
+      // only the host's choice counts; the others see the buttons greyed out
+      game?.onEnd(m.result, [
+        { label: m.result.reason === 'clear' ? '再打一次' : '直接重來', primary: true, hostOnly: true, onClick: () => net.send({ t: 'again' }) },
+        { label: '返回待機室', hostOnly: true, onClick: () => net.send({ t: 'back' }) },
+      ]);
       break;
     case 'error':
       if (awaiting) {

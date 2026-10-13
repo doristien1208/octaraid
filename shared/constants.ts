@@ -1,5 +1,5 @@
 /** Shown on the entry screen and in /healthz, so a deployment can be checked at a glance. */
-export const VERSION = '0.4.2';
+export const VERSION = '0.4.3';
 
 /** The test machine gives this game port 3100; the Game Hub passes it in PORT as well. */
 export const DEFAULT_PORT = 3100;
@@ -28,7 +28,8 @@ export const RULES = {
   moveGap: 0.5,
   countdown: sec(10),
   tallyMs: 3000,
-  resultsMs: 15_000,
+  /** the results wait this long for the host to pick 直接重來 or 返回待機室, then go back to the waiting room */
+  resultsMs: 60_000,
   chatMax: 100,
   chatGapMs: 500, // at most 2 messages per second
   nameMax: 12,
@@ -46,11 +47,18 @@ export const RULES = {
   /** a cast is cut when the caster moves further than this (metres) */
   castMove: 0.1,
   comboWindow: sec(15),
-  /** 1 potency = 10 damage, ±5% */
-  potency: 10,
+  /**
+   * Damage = potency × 9.5 × (1 + determination), ±5%, then a critical hit ×1.5 (10%) and a direct hit
+   * ×1.25 (10%, damage only), as FF14's クリティカル, ダイレクトヒット and 意思力: on average about 10.5 a
+   * potency, as the old flat 10 with 10% crits. Heals get determination and crits too.
+   */
+  potency: 9.5,
   variance: 0.05,
   critRate: 0.1,
   critMul: 1.5,
+  dhRate: 0.1,
+  dhMul: 1.25,
+  det: 0.03,
   /** tank stance: a tank's damage makes this much more enmity (×3 in v0.3.0 was too easy to lose) */
   enmityTank: 6,
   /** what tanks start with on every enemy's list, so DPS openers do not pull the boss off them */

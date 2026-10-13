@@ -192,6 +192,8 @@ export class Fight {
   /** the arena's pillars that have shattered (Hard 絕對零度): they no longer hide anyone */
   readonly pillarsBroken: boolean[];
   private readonly rng: Rng;
+  /** what is hitting the players right now (a boss move, 攻擊), named in the damage events for the combat log */
+  hitName: string | null = null;
   private foeSeq = 0;
   private events: FightEvent[] = [];
   /** who is casting the Limit Break */
@@ -587,16 +589,16 @@ export class Fight {
           if (foe && this.hittable(foe)) this.addStatus(foe, { id: fx.s, src: p.id, until: this.tick + sec(fx.dur), v: fx.p }, true);
           break;
         case 'heal':
-          if (ally) this.heal(p, ally, fx.amount, true);
+          if (ally) this.heal(p, ally, fx.amount, true, false, slot);
           break;
         case 'healFull':
-          if (ally) this.heal(p, ally, this.maxHp(ally), false);
+          if (ally) this.heal(p, ally, this.maxHp(ally), false, false, slot);
           break;
         case 'healSelf':
-          this.heal(p, p, this.maxHp(p) * fx.pct, false);
+          this.heal(p, p, this.maxHp(p) * fx.pct, false, false, slot);
           break;
         case 'partyHeal':
-          for (const q of this.near(p, fx.r)) this.heal(p, q, fx.amount, true);
+          for (const q of this.near(p, fx.r)) this.heal(p, q, fx.amount, true, false, slot);
           break;
         case 'shield':
           if (ally) this.addShield(p, ally, fx.s, fx.amount, fx.dur);
@@ -724,14 +726,16 @@ export class Fight {
   // ================================================================ damage, healing, statuses
 
   private damageFoe(p: Fighter, e: Foe, potency: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean }): void {
-    let amount = potency * RULES.potency * (1 + (this.rng.next() * 2 - 1) * RULES.variance);
+    let amount = potency * RULES.potency * (1 + RULES.det) * (1 + (this.rng.next() * 2 - 1) * RULES.variance);
     const crit = this.rng.next() < RULES.critRate;
     if (crit) amount *= RULES.critMul;
+    const dh = this.rng.next() < RULES.dhRate;
+    if (dh) amount *= RULES.dhMul;
     amount *= this.damageMul(p);
-    this.dealFoe(p, e, Math.max(1, Math.round(amount)), slot, { ...opts, crit });
+    this.dealFoe(p, e, Math.max(1, Math.round(amount)), slot, { ...opts, crit, dh });
   }
 
-  private dealFoe(p: Fighter, e: Foe, amount: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean; crit?: boolean }): void {
+  private dealFoe(p: Fighter, e: Foe, amount: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean; crit?: boolean; dh?: boolean }): void {
     if (!this.hittable(e)) return;
     if (e.minHp !== undefined && e.hp <= e.minHp) {
       this.emit({ k: 'dmg', s: p.id, t: e.id, a: 0, iv: 1, sk: slot });
@@ -741,7 +745,7 @@ export class Fight {
     e.hp -= dealt;
     p.stats.dmg += dealt;
     if (!p.dead) e.enmity.set(p.id, (e.enmity.get(p.id) ?? 0) + dealt * (p.role === 'tank' ? RULES.enmityTank : 1) * (opts.enmity ?? 1));
-    this.emit({ k: 'dmg', s: p.id, t: e.id, a: amount, c: opts.crit ? 1 : undefined, sk: slot, pos: opts.pos, dot: opts.dot ? 1 : undefined });
+    this.emit({ k: 'dmg', s: p.id, t: e.id, a: amount, c: opts.crit ? 1 : undefined, dh: opts.dh ? 1 : undefined, sk: slot, pos: opts.pos, dot: opts.dot ? 1 : undefined });
     const steal = this.statusSum(p, 'lifesteal');
     if (steal > 0 && !p.dead) this.heal(p, p, dealt * steal, false);
   }
@@ -755,8 +759,9 @@ export class Fight {
     // 共鳴: a twin standing too close to the other hits harder, 10% a stack
     const res = src?.statuses.find((s) => s.id === 'resonance');
     if (res) raw *= 1 + 0.1 * res.v;
+    const n = this.hitName ?? undefined;
     if (q.statuses.some((s) => STATUS[s.id].invuln)) {
-      this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: 0, iv: 1 });
+      this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: 0, iv: 1, n });
       return 0;
     }
     let amount = raw;
@@ -779,7 +784,7 @@ export class Fight {
     if (q.statuses.some((s) => STATUS[s.id].floor) && q.hp - amount < 1) amount = Math.max(0, q.hp - 1);
     q.hp -= amount;
     q.stats.taken += amount + absorbed;
-    this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: amount, ab: absorbed || undefined });
+    this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: amount, ab: absorbed || undefined, n });
     if (q.hp <= 0) this.die(q);
     return amount;
   }
@@ -873,9 +878,9 @@ export class Fight {
   }
 
   /** Heals a player; returns the HP actually restored. Healing makes enmity on every enemy. */
-  private heal(src: Fighter | null, q: Fighter, raw: number, varies: boolean, hot = false): number {
+  private heal(src: Fighter | null, q: Fighter, raw: number, varies: boolean, hot = false, sk?: number): number {
     if (q.dead) return 0;
-    let amount = raw * (src ? this.echoMul(src) : 1);
+    let amount = raw * (src ? this.echoMul(src) * (1 + RULES.det) : 1);
     let crit = false;
     if (varies) {
       amount *= 1 + (this.rng.next() * 2 - 1) * RULES.variance;
@@ -890,13 +895,13 @@ export class Fight {
       const foes = this.foes.filter((f) => f.hp > 0);
       if (!src.dead) for (const f of foes) f.enmity.set(src.id, (f.enmity.get(src.id) ?? 0) + (eff * RULES.enmityHeal) / foes.length);
     }
-    if (amount > 0) this.emit({ k: 'heal', s: src?.id ?? null, t: q.id, a: amount, c: crit ? 1 : undefined, hot: hot ? 1 : undefined });
+    if (amount > 0) this.emit({ k: 'heal', s: src?.id ?? null, t: q.id, a: amount, c: crit ? 1 : undefined, hot: hot ? 1 : undefined, sk });
     return eff;
   }
 
   private addShield(src: Fighter, q: Fighter, id: StatusId, amount: number, dur: number): void {
     if (q.dead) return;
-    this.addStatus(q, { id, src: src.id, until: this.tick + sec(dur), v: Math.round(amount * this.echoMul(src)) }, false);
+    this.addStatus(q, { id, src: src.id, until: this.tick + sec(dur), v: Math.round(amount * this.echoMul(src) * (1 + RULES.det)) }, false);
   }
 
   /**
@@ -986,7 +991,8 @@ export class Fight {
         if (STATUS[s.id].hot) this.heal(this.players.get(s.src) ?? null, p, s.v * n, false, true);
       }
       for (const z of this.zones) {
-        if (z.s === 'sanctuary' && Math.hypot(p.x - z.x, p.z - z.z) <= z.r) this.heal(this.players.get(z.owner) ?? null, p, 150 * n, false, true);
+        const zoneHot = STATUS[z.s].zoneHot;
+        if (zoneHot && Math.hypot(p.x - z.x, p.z - z.z) <= z.r) this.heal(this.players.get(z.owner) ?? null, p, zoneHot * n, false, true);
       }
       if (!this.roles.healer) this.heal(null, p, this.maxHp(p) * RULES.noHealerRegen * n, false, true);
     }
@@ -1043,7 +1049,9 @@ export class Fight {
     if (top && reaches && foe.auto > 0 && !foe.cast && !foe.dash && this.tick >= foe.autoAt) {
       foe.autoAt = this.tick + sec(3);
       this.emit({ k: 'boss', i: foe.id, n: '攻擊', m: 'auto', t: top.id });
+      this.hitName = '攻擊';
       this.hurt(top, foe.auto * (this.roles.tank ? 1 : RULES.noTankDamage), foe);
+      this.hitName = null;
     }
   }
 
@@ -1073,10 +1081,12 @@ export class Fight {
       foe.autoAt = this.tick + sec(PRACTICE.autoEvery);
       const move = PRACTICE.moves.find((m) => m.name === c.name)!;
       this.emit({ k: 'boss', i: foe.id, n: c.name, m: c.m === 'buster' ? 'buster' : 'raidwide', t: c.target ?? undefined });
+      this.hitName = c.name;
       if (c.m === 'buster') {
         const victim = c.target ? this.players.get(c.target) : undefined;
         if (victim) this.hurt(victim, move.dmg[diff] * scale, foe);
       } else for (const q of this.living()) this.hurt(q, move.dmg[diff], foe);
+      this.hitName = null;
       return;
     }
     for (const m of PRACTICE.moves) {
@@ -1091,7 +1101,9 @@ export class Fight {
     if (top && this.tick >= foe.autoAt) {
       foe.autoAt = this.tick + sec(PRACTICE.autoEvery);
       this.emit({ k: 'boss', i: foe.id, n: '攻擊', m: 'auto', t: top.id });
+      this.hitName = '攻擊';
       this.hurt(top, PRACTICE.auto[diff] * scale, foe);
+      this.hitName = null;
     }
   }
 

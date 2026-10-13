@@ -1,7 +1,7 @@
 import { FOES } from '../../shared/bosses/foes';
 import { RULES, TICK_RATE } from '../../shared/constants';
 import { clock, difficultyName, encounterById } from '../../shared/encounters';
-import { LB_SLOT, LIMIT_BREAKS, jobById, type Job } from '../../shared/jobs';
+import { LB_SLOT, LIMIT_BREAKS, jobById, type Job, type SkillInfo } from '../../shared/jobs';
 import { END_NAMES, type FightEvent, type GameResult, type GameStartInfo, type SnapStatus, type Snapshot } from '../../shared/protocol';
 import { STATUS, STATUS_IDS } from '../../shared/status';
 import { h, isSubmitKey } from '../dom';
@@ -57,7 +57,22 @@ function statusIcons(list: SnapStatus[] | undefined, max: number, big = false): 
 export interface ResultAction {
   label: string;
   primary?: boolean;
+  /** only the room's host may press it (直接重來, 返回待機室) */
+  hostOnly?: boolean;
   onClick(): void;
+}
+
+/** What a combat log line is about, for its colour. */
+export type LogKind = 'taken' | 'dealt' | 'heal' | 'cast' | 'death' | 'fail' | 'info';
+
+/** The hover card for a skill: what kind, cast, cooldown, reach, then the description. */
+function skillTip(s: SkillInfo): HTMLElement[] {
+  const meta = [s.spell ? '魔法' : '', s.cast ? `詠唱 ${s.cast} 秒` : '瞬發', s.cd ? `冷卻 ${s.cd} 秒` : '', s.range ? `射程 ${s.range} m` : ''].filter(Boolean);
+  return [
+    h('div', { class: 'tip-head' }, h('strong', null, s.name), h('span', { class: `tip-kind ${s.kind}` }, s.kind === 'gcd' ? 'GCD' : '能力技')),
+    h('div', { class: 'tip-meta' }, meta.join(' · ')),
+    h('p', null, s.desc),
+  ];
 }
 
 /**
@@ -73,7 +88,17 @@ export class Hud {
   private readonly center = h('div', { class: 'hud-center' });
   private readonly banner = h('div', { class: 'hud-banner' });
   private readonly log = h('div', { class: 'hud-log' });
+  /** the other channel: who hit whom with what, for how much */
+  private readonly combatLog = h('div', { class: 'hud-log combat' });
+  private readonly chatTab: HTMLButtonElement;
+  private readonly combatTab: HTMLButtonElement;
+  private channel: 'chat' | 'combat' = 'chat';
   private readonly chatBox: HTMLElement;
+  /** the skill card shown bottom right while the mouse is over a hotbar slot */
+  private readonly tip = h('div', { class: 'hud-tip' });
+  private resultActs: { btn: HTMLButtonElement; hostOnly: boolean }[] = [];
+  private resultNote: HTMLElement | null = null;
+  private host = false;
   private readonly hotbar = h('div', { class: 'hud-hotbar' });
   private readonly slots: { el: HTMLElement; sweep: HTMLElement; num: HTMLElement }[] = [];
   private readonly lbBox: HTMLElement;
@@ -150,7 +175,10 @@ export class Hud {
       } else if (e.key === 'Escape') this.closeChat();
     });
     this.chatInput.addEventListener('blur', () => this.closeChat());
-    this.chatBox = h('div', { class: 'hud-chat' }, this.log, this.chatInput);
+    this.chatTab = h('button', { class: 'on', onclick: () => this.setChannel('chat') }, '聊天');
+    this.combatTab = h('button', { onclick: () => this.setChannel('combat') }, '戰鬥紀錄');
+    this.combatLog.hidden = true;
+    this.chatBox = h('div', { class: 'hud-chat' }, h('div', { class: 'log-tabs' }, this.chatTab, this.combatTab), this.log, this.combatLog, this.chatInput);
 
     this.endBtn = h('button', { class: 'btn small', onclick: () => this.act.endTest() }, '結束測試');
     const lb = this.job ? LIMIT_BREAKS[this.job.role] : null;
@@ -208,9 +236,35 @@ export class Hud {
         this.hotbar,
       ),
       this.lbBox,
+      this.tip,
       h('div', { class: 'hud-help' }, this.help, this.fps),
     );
+    this.tip.hidden = true;
+    if (lb) this.hoverTip(this.lbBox, () => [h('div', { class: 'tip-head' }, h('strong', null, lb.name), h('span', { class: 'tip-kind lb' }, '極限技')), h('div', { class: 'tip-meta' }, `全隊共用一條量表，滿了才能用${lb.cast ? ` · 詠唱 ${lb.cast} 秒` : ' · 瞬發'}`), h('p', null, lb.desc)]);
     this.setHost(false);
+  }
+
+  /** Shows the card bottom right while the mouse is over `el`. */
+  private hoverTip(el: HTMLElement, build: () => HTMLElement[]): void {
+    el.removeAttribute('title');
+    el.addEventListener('mouseenter', () => {
+      this.tip.replaceChildren(...build());
+      this.tip.hidden = false;
+    });
+    el.addEventListener('mouseleave', () => (this.tip.hidden = true));
+  }
+
+  /** 聊天 or 戰鬥紀錄; the one not shown marks new lines with a dot. */
+  private setChannel(c: 'chat' | 'combat'): void {
+    this.channel = c;
+    this.chatTab.classList.toggle('on', c === 'chat');
+    this.combatTab.classList.toggle('on', c === 'combat');
+    (c === 'chat' ? this.chatTab : this.combatTab).classList.remove('new');
+    this.log.hidden = c !== 'chat';
+    this.combatLog.hidden = c !== 'combat';
+    const box = c === 'chat' ? this.log : this.combatLog;
+    box.scrollTop = box.scrollHeight;
+    this.showLog();
   }
 
 
@@ -225,13 +279,14 @@ export class Hud {
         const num = h('em');
         const el = h(
           'div',
-          { class: `slot ${s?.kind ?? ''}`, title: s ? `${s.name}：${s.desc}` : '' },
+          { class: `slot ${s?.kind ?? ''}` },
           sweep,
           h('span', { class: 'key' }, keysText(b, action)),
           h('span', { class: 'name' }, s?.name ?? ''),
           h('span', { class: 'meta' }, s ? (s.kind === 'gcd' ? (s.cast ? `詠唱 ${s.cast}s` : 'GCD') : '能力技') : ''),
           num,
         );
+        if (s) this.hoverTip(el, () => skillTip(s));
         this.slots.push({ el, sweep, num });
         return el;
       }),
@@ -241,7 +296,10 @@ export class Hud {
   }
 
   setHost(host: boolean): void {
+    this.host = host;
     this.endBtn.hidden = !host;
+    for (const a of this.resultActs) if (a.hostOnly) a.btn.disabled = !host;
+    if (this.resultNote) this.resultNote.textContent = host ? '你是房主：選擇直接重來或返回待機室（60 秒內沒選就回待機室）' : '等房主選擇：直接重來或返回待機室';
   }
 
   /** Flashes a hotbar slot (or the LB box) when its key is pressed. */
@@ -307,10 +365,23 @@ export class Hud {
   }
 
   addChat(name: string, text: string): void {
-    this.log.append(name ? h('div', null, h('strong', null, `${name}：`), text) : h('div', { class: 'system' }, text));
-    while (this.log.childElementCount > 40) this.log.firstElementChild?.remove();
-    this.log.scrollTop = this.log.scrollHeight;
+    this.append(this.log, name ? h('div', null, h('strong', null, `${name}：`), text) : h('div', { class: 'system' }, text), 60);
+    if (this.channel !== 'chat') this.chatTab.classList.add('new');
     this.showLog();
+  }
+
+  /** A line in the 戰鬥紀錄 channel; `mine`: it happened to me (stands out). */
+  logCombat(kind: LogKind, text: string, mine = false): void {
+    this.append(this.combatLog, h('div', { class: `cl ${kind}${mine ? ' mine' : ''}` }, text), 300);
+    if (this.channel !== 'combat') this.combatTab.classList.add('new');
+  }
+
+  /** Adds a line and keeps the box at the bottom, unless someone scrolled up to read. */
+  private append(box: HTMLElement, line: HTMLElement, max: number): void {
+    const atBottom = box.hidden || box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    box.append(line);
+    while (box.childElementCount > max) box.firstElementChild?.remove();
+    if (atBottom) box.scrollTop = box.scrollHeight;
   }
 
   /** The log fades 10 seconds after the last line (it stays while typing). */
@@ -502,7 +573,10 @@ export class Hud {
     this.fps.textContent = `${fps} fps`;
   }
 
-  /** The results card; `actions` (offline practice) replace the note about going back to the waiting room. */
+  /**
+   * The results card. `actions`: 再打一次 / 換關卡 in offline practice; in a room 直接重來 / 返回待機室,
+   * which only the host can press (the others see who decides).
+   */
   showResults(result: GameResult, actions?: readonly ResultAction[]): void {
     this.results?.remove();
     const secsIn = Math.max(1, result.time);
@@ -538,15 +612,19 @@ export class Hud {
             }),
           ),
         ),
-        actions
-          ? h(
-              'div',
-              { class: 'results-actions' },
-              ...actions.map((x) => h('button', { class: `btn${x.primary ? ' primary' : ''}`, onclick: x.onClick }, x.label)),
-            )
-          : h('p', { class: 'muted small' }, '稍後自動回到待機室'),
+        actions ? h('div', { class: 'results-actions' }, ...this.resultButtons(actions)) : h('p', { class: 'muted small' }, '稍後自動回到待機室'),
+        (this.resultNote = actions?.some((x) => x.hostOnly) ? h('p', { class: 'muted small' }) : null),
       ),
     );
     this.el.append(this.results);
+    this.setHost(this.host);
+  }
+
+  private resultButtons(actions: readonly ResultAction[]): HTMLButtonElement[] {
+    this.resultActs = actions.map((x) => ({
+      btn: h('button', { class: `btn${x.primary ? ' primary' : ''}`, onclick: x.onClick }, x.label),
+      hostOnly: !!x.hostOnly,
+    }));
+    return this.resultActs.map((a) => a.btn);
   }
 }

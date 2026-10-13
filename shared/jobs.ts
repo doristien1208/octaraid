@@ -174,25 +174,25 @@ export const JOBS: readonly Job[] = [
     desc: '預先護盾與減傷',
     skills: [
       gcd('星屑彈', 1.5, 0, '25 m，威力 200', { target: 'enemy', range: RANGED, spell: true, fx: [hit(200)] }),
-      gcd('星盾術', 1.5, 0, '30 m 單體回復 1,500，加 2,000 護盾 20 秒', {
+      gcd('星盾術', 1.5, 0, '30 m 單體回復 2,000，加 2,500 護盾 20 秒', {
         target: 'ally',
         range: HEAL,
         spell: true,
         fx: [
-          { k: 'heal', amount: 1500 },
-          { k: 'shield', s: 'starShield', amount: 2000, dur: 20 },
+          { k: 'heal', amount: 2000 },
+          { k: 'shield', s: 'starShield', amount: 2500, dur: 20 },
         ],
       }),
-      gcd('群星庇護', 2, 15, '15 m 內隊友回復 1,000，加 1,500 護盾 20 秒', {
+      gcd('群星庇護', 2, 15, '15 m 內隊友回復 1,500，加 2,000 護盾 20 秒', {
         target: 'self',
         range: 0,
         spell: true,
         fx: [
-          { k: 'partyHeal', r: 15, amount: 1000 },
-          { k: 'partyShield', s: 'starVeil', r: 15, amount: 1500, dur: 20 },
+          { k: 'partyHeal', r: 15, amount: 1500 },
+          { k: 'partyShield', s: 'starVeil', r: 15, amount: 2000, dur: 20 },
         ],
       }),
-      ogcd('星界領域', 90, '腳下 8 m 圓形領域 15 秒：內部受傷 −10%、每秒回復 150', { target: 'self', range: 0, fx: [{ k: 'zone', s: 'sanctuary', r: 8, dur: 15 }] }),
+      ogcd('星界領域', 90, '腳下 8 m 圓形領域 15 秒：內部受傷 −15%、每秒回復 250', { target: 'self', range: 0, fx: [{ k: 'zone', s: 'sanctuary', r: 8, dur: 15 }] }),
       gcd('星還術', 6, 20, '復活 1 名倒地隊友', { target: 'dead', range: HEAL, spell: true, fx: [{ k: 'raise' }] }),
     ],
   },

@@ -353,10 +353,16 @@ export class RoomScreen {
   }
 
   addChat(name: string, text: string): void {
-    this.log.append(
-      name ? h('div', null, h('strong', null, `${name}：`), text) : h('div', { class: 'system' }, text),
-    );
-    while (this.log.childElementCount > 80) this.log.firstElementChild?.remove();
-    this.log.scrollTop = this.log.scrollHeight;
+    // follow new lines unless someone scrolled up to read (a box off screen has no scroll position yet)
+    const log = this.log;
+    const atBottom = !log.isConnected || log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    log.append(name ? h('div', null, h('strong', null, `${name}：`), text) : h('div', { class: 'system' }, text));
+    while (log.childElementCount > 80) log.firstElementChild?.remove();
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+
+  /** The screen is back (after a fight, or the first time): the chat starts at its newest line. */
+  onShow(): void {
+    requestAnimationFrame(() => (this.log.scrollTop = this.log.scrollHeight));
   }
 }

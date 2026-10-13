@@ -1546,6 +1546,15 @@ p {
   color: #ffb03b;
 }
 
+/* a direct hit: blue-white; with a crit as well, the crit's size */
+.float.dh {
+  color: #bfe9ff;
+}
+
+.float.crit.dh {
+  color: #ffd86b;
+}
+
 .float.small {
   font-size: 12px;
   opacity: 0.85;
@@ -2085,4 +2094,162 @@ p {
   gap: 10px;
   justify-content: center;
   margin-top: 6px;
+}
+
+/* ------------------------------------------------------------ chat channels, combat log, skill card */
+
+.log-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  pointer-events: auto;
+}
+
+.log-tabs button {
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--hud-bg);
+  color: #cfc8f0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 10px;
+  cursor: pointer;
+  position: relative;
+}
+
+.log-tabs button.on {
+  color: #fff;
+  background: rgba(74, 47, 134, 0.85);
+}
+
+/* new lines in the channel not shown */
+.log-tabs button.new::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffb03b;
+}
+
+.hud-log[hidden] {
+  display: none;
+}
+
+.hud-log.combat {
+  max-height: 240px;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.hud-log.combat:empty {
+  display: block;
+  min-height: 24px;
+}
+
+.hud-log.combat:empty::before {
+  content: '還沒有戰鬥紀錄';
+  color: #cfc8f0;
+}
+
+.cl.taken {
+  color: #ffb3b3;
+}
+
+.cl.taken.mine {
+  color: #ff7b7b;
+  font-weight: 800;
+}
+
+.cl.dealt {
+  color: #fff3c4;
+}
+
+.cl.heal {
+  color: #9dffb4;
+}
+
+.cl.cast {
+  color: #d9b8ff;
+}
+
+.cl.death {
+  color: #ff5a5a;
+  font-weight: 800;
+}
+
+.cl.fail {
+  color: #ffb03b;
+}
+
+.cl.info {
+  color: #cfc8f0;
+}
+
+.cl b {
+  font-weight: 900;
+}
+
+.hud-hotbar .slot,
+.hud-lb {
+  pointer-events: auto;
+}
+
+.hud-tip {
+  position: absolute;
+  right: 12px;
+  bottom: 44px;
+  width: 300px;
+  background: rgba(20, 16, 40, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 3;
+}
+
+.hud-tip[hidden] {
+  display: none;
+}
+
+.tip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tip-head strong {
+  font-size: 15px;
+}
+
+.tip-kind {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #3d7be0;
+}
+
+.tip-kind.ogcd {
+  background: #8e6bd1;
+}
+
+.tip-kind.lb {
+  background: #e0a100;
+}
+
+.tip-meta {
+  font-size: 12px;
+  color: #cfc8f0;
+}
+
+.hud-tip p {
+  line-height: 1.45;
 }

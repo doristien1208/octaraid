@@ -151,16 +151,25 @@ describe('damage', () => {
     }
   });
 
-  it('turns potency into damage: ×10, ±5%, crits ×1.5', () => {
+  it('turns potency into damage: ×9.5 and determination, ±5%, crits ×1.5 and direct hits ×1.25', () => {
     const f = fight(['ranger'], { calm: true });
     place(f, 'p0', 0, 12);
-    const amounts: number[] = [];
-    for (let k = 0; k < 40; k++) {
+    const hits: Extract<FightEvent, { k: 'dmg' }>[] = [];
+    for (let k = 0; k < 60; k++) {
       f.use('p0', 0); // 速射, 220
-      for (const e of run(f, RULES.gcd)) if (e.k === 'dmg' && e.s === 'p0') amounts.push(e.a);
+      for (const e of run(f, RULES.gcd)) if (e.k === 'dmg' && e.s === 'p0') hits.push(e);
     }
-    for (const a of amounts) expect(a >= 2090 && a <= 2310 * 1.5 + 1).toBe(true);
-    expect(amounts.some((a) => a > 2310)).toBe(true); // at least one crit in 40
+    const base = 220 * RULES.potency * (1 + RULES.det);
+    for (const e of hits) {
+      const mul = (e.c ? RULES.critMul : 1) * (e.dh ? RULES.dhMul : 1);
+      expect(e.a).toBeGreaterThanOrEqual(Math.floor(base * 0.95 * mul));
+      expect(e.a).toBeLessThanOrEqual(Math.ceil(base * 1.05 * mul));
+    }
+    expect(hits.some((e) => e.c)).toBe(true); // at least one crit in 60
+    expect(hits.some((e) => e.dh)).toBe(true); // and one direct hit
+    const mean = hits.reduce((n, e) => n + e.a, 0) / hits.length;
+    expect(mean / 220).toBeGreaterThan(9.8); // about 10.5 a potency on average
+    expect(mean / 220).toBeLessThan(11.3);
   });
 
   it('multiplies mitigation and lets shields absorb first', () => {
@@ -175,14 +184,14 @@ describe('damage', () => {
     const ev = run(f, sec(PRACTICE.autoEvery));
     const hit = ev.find((e): e is Extract<FightEvent, { k: 'dmg' }> => e.k === 'dmg' && e.t === 'p0');
     expect(hit!.a).toBe(Math.round(500 * 0.7 * 0.9));
-    // a 2,000 shield takes the next hit whole
+    // a 2,500 shield (with determination) takes the next hit whole
     place(f, 'p1', 0, 12);
     f.use('p1', 1, { target: 'p0' }); // 星盾術
     const ev2 = run(f, sec(PRACTICE.autoEvery));
     const hit2 = ev2.find((e): e is Extract<FightEvent, { k: 'dmg' }> => e.k === 'dmg' && e.t === 'p0');
     expect(hit2!.a).toBe(0);
     expect(hit2!.ab).toBe(Math.round(500 * 0.7 * 0.9));
-    expect(tank.statuses.find((s) => s.id === 'starShield')!.v).toBe(2000 - Math.round(500 * 0.7 * 0.9));
+    expect(tank.statuses.find((s) => s.id === 'starShield')!.v).toBe(Math.round(2500 * (1 + RULES.det)) - Math.round(500 * 0.7 * 0.9));
   });
 });
 

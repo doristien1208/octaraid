@@ -6,8 +6,8 @@ import type { C2S, S2C } from '../shared/protocol';
 import { createApp } from '../server/app';
 
 let base = '';
-// the vote result, the countdown and the results screen are shortened so the test does not wait 28 seconds
-const app = createApp(null, { tallyMs: 60, resultsMs: 300, countdownMs: 300 });
+// the vote result, the countdown and the results screen are shortened so the test does not wait a minute
+const app = createApp(null, { tallyMs: 60, resultsMs: 1500, countdownMs: 300 });
 
 beforeAll(async () => {
   await new Promise<void>((resolve) => app.server.listen(0, '127.0.0.1', resolve));
@@ -166,7 +166,7 @@ describe('server', () => {
     alice.send({ t: 'use', s: 5 }); // the Limit Break with an empty gauge
     expect(await alice.wait('deny')).toMatchObject({ s: 5, why: 'lb' });
 
-    // only the host can end a test fight; results, then everyone is back in the waiting room
+    // only the host can end a test fight
     bob.send({ t: 'endtest' });
     await sleep(100);
     expect(bob.inbox.some((m) => m.t === 'end')).toBe(false);
@@ -174,6 +174,23 @@ describe('server', () => {
     alice.send({ t: 'endtest' });
     const end = await bob.wait('end');
     expect(end.result.reason).toBe('test');
+
+    // on the results only the host chooses: 直接重來 starts the same duty with no vote...
+    bob.inbox.length = 0;
+    bob.send({ t: 'again' });
+    await sleep(100);
+    expect(bob.inbox.some((m) => m.t === 'start')).toBe(false);
+    alice.send({ t: 'again' });
+    const again = await bob.wait('start');
+    expect(again.game).toMatchObject({ enc: 'twins', hard: true });
+    expect(bob.inbox.some((m) => m.t === 'tally')).toBe(false);
+
+    // ...and 返回待機室 goes back at once instead of waiting for the timer
+    await alice.wait('snap', (m) => m.s.ph === 1);
+    alice.inbox.length = 0;
+    alice.send({ t: 'endtest' });
+    await alice.wait('end');
+    alice.send({ t: 'back' });
     const waiting = await alice.wait('room', (m) => m.room.phase === 'waiting');
     expect(waiting.room.members.every((x) => !x.ready)).toBe(true);
     expect(waiting.room.members.filter((x) => x.vote === 7)).toHaveLength(2); // votes stay for a retry
