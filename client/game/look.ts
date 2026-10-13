@@ -29,8 +29,8 @@ export interface Look {
   extras: readonly Extra[];
   idle: string;
   run: string;
-  /** the clip each skill plays; the basic skill has one per combo step */
-  skills: readonly [readonly [string, string, string], string, string, string, string];
+  /** the clip each skill plays (slots 0–9; 疾走 plays none); the basic skill has one per combo step */
+  skills: readonly [readonly [string, string, string], ...string[]];
   /** played while casting */
   cast: string;
 }
@@ -56,7 +56,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: ['plume'],
     idle: 'Idle_A',
     run: 'Running_A',
-    skills: [['Melee_1H_Attack_Chop', 'Melee_1H_Attack_Slice_Diagonal', 'Melee_1H_Attack_Slice_Horizontal'], 'Use_Item', 'Melee_Block', 'Melee_Block', 'Use_Item'],
+    skills: [
+      ['Melee_1H_Attack_Chop', 'Melee_1H_Attack_Slice_Diagonal', 'Melee_1H_Attack_Slice_Horizontal'],
+      'Use_Item',
+      'Melee_Block',
+      'Melee_Block',
+      'Use_Item',
+      'Melee_1H_Attack_Slice_Horizontal',
+      'Melee_1H_Attack_Stab',
+      'Use_Item',
+      'Use_Item',
+      'Ranged_Magic_Shoot',
+    ],
     cast: 'Ranged_Magic_Spellcasting',
   },
   berserker: {
@@ -67,7 +78,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: [],
     idle: 'Melee_2H_Idle',
     run: 'Running_A',
-    skills: [['Melee_2H_Attack_Chop', 'Melee_2H_Attack_Slice', 'Melee_2H_Attack_Chop'], 'Use_Item', 'Melee_Block', 'Melee_Block', 'Melee_2H_Attack_Spin'],
+    skills: [
+      ['Melee_2H_Attack_Chop', 'Melee_2H_Attack_Slice', 'Melee_2H_Attack_Chop'],
+      'Use_Item',
+      'Melee_Block',
+      'Melee_Block',
+      'Melee_2H_Attack_Spin',
+      'Melee_2H_Attack_Slice',
+      'Melee_2H_Attack_Chop',
+      'Use_Item',
+      'Cheering',
+      'Use_Item',
+    ],
     cast: 'Ranged_Magic_Spellcasting',
   },
   priest: {
@@ -81,7 +103,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: ['halo', 'sunDisc'],
     idle: 'Idle_A',
     run: 'Running_A',
-    skills: [['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'], 'Ranged_Magic_Raise', 'Ranged_Magic_Raise', 'Ranged_Magic_Raise', 'Ranged_Magic_Raise'],
+    skills: [
+      ['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'],
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+      'Use_Item',
+      'Ranged_Magic_Shoot',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+    ],
     cast: 'Ranged_Magic_Spellcasting',
   },
   warden: {
@@ -95,7 +128,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: ['crown', 'orbs'],
     idle: 'Idle_A',
     run: 'Running_A',
-    skills: [['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'], 'Ranged_Magic_Raise', 'Ranged_Magic_Raise', 'Ranged_Magic_Summon', 'Ranged_Magic_Raise'],
+    skills: [
+      ['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'],
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Raise',
+      'Use_Item',
+      'Ranged_Magic_Shoot',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Summon',
+    ],
     cast: 'Ranged_Magic_Spellcasting',
   },
   brawler: {
@@ -115,6 +159,11 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
       'Melee_Unarmed_Attack_Punch_A',
       'Cheering',
       'Dodge_Forward',
+      'Melee_Unarmed_Attack_Kick',
+      'Use_Item',
+      'Melee_Unarmed_Attack_Punch_A',
+      'Use_Item',
+      'Use_Item',
     ],
     cast: 'Ranged_Magic_Spellcasting',
   },
@@ -126,7 +175,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: ['wings', 'spear'],
     idle: 'Melee_2H_Idle',
     run: 'Running_A',
-    skills: [['Melee_2H_Attack_Stab', 'Melee_1H_Attack_Stab', 'Melee_2H_Attack_Stab'], 'Melee_1H_Attack_Stab', 'Melee_1H_Attack_Jump_Chop', 'Cheering', 'Dodge_Backward'],
+    skills: [
+      ['Melee_2H_Attack_Stab', 'Melee_1H_Attack_Stab', 'Melee_2H_Attack_Stab'],
+      'Melee_1H_Attack_Stab',
+      'Melee_1H_Attack_Jump_Chop',
+      'Cheering',
+      'Dodge_Backward',
+      'Melee_1H_Attack_Jump_Chop',
+      'Use_Item',
+      'Melee_1H_Attack_Stab',
+      'Use_Item',
+      'Use_Item',
+    ],
     cast: 'Ranged_Magic_Spellcasting',
   },
   ranger: {
@@ -137,7 +197,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: ['cap'],
     idle: 'Ranged_Bow_Idle',
     run: 'Running_HoldingBow',
-    skills: [['Ranged_Bow_Release', 'Ranged_Bow_Release', 'Ranged_Bow_Release'], 'Ranged_Bow_Release', 'Ranged_Bow_Release', 'Use_Item', 'Dodge_Backward'],
+    skills: [
+      ['Ranged_Bow_Release', 'Ranged_Bow_Release', 'Ranged_Bow_Release'],
+      'Ranged_Bow_Release',
+      'Ranged_Bow_Release',
+      'Use_Item',
+      'Dodge_Backward',
+      'Cheering',
+      'Ranged_Bow_Release',
+      'Ranged_Bow_Release',
+      'Use_Item',
+      'Use_Item',
+    ],
     cast: 'Ranged_Bow_Idle',
   },
   sorcerer: {
@@ -151,7 +222,18 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
     extras: ['runes'],
     idle: 'Idle_A',
     run: 'Running_A',
-    skills: [['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'], 'Ranged_Magic_Shoot', 'Use_Item', 'Ranged_Magic_Summon', 'Ranged_Magic_Raise'],
+    skills: [
+      ['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'],
+      'Ranged_Magic_Shoot',
+      'Use_Item',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Raise',
+      'Use_Item',
+      'Use_Item',
+      'Ranged_Magic_Shoot',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Shoot',
+    ],
     cast: 'Ranged_Magic_Spellcasting',
   },
 };

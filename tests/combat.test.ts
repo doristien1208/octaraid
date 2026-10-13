@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RULES, TICK_RATE, sec } from '../shared/constants';
 import { encounterById } from '../shared/encounters';
-import { LB_SLOT, type JobId } from '../shared/jobs';
+import { LB_SLOT, SPRINT_SLOT, type JobId } from '../shared/jobs';
 import type { FightEvent } from '../shared/protocol';
 import { reach, sideOf } from '../shared/sim/arena';
 import { Fight, type FightOptions } from '../shared/sim/fight';
@@ -351,6 +351,124 @@ describe('movement skills', () => {
     const ev = run(f, 2);
     expect(damage(ev, 'p0')).toBeGreaterThan(6000);
     expect(reach(p.x, p.z, boss(f))).toBeLessThan(0.5);
+  });
+});
+
+describe('the 10-skill kits (v0.5)', () => {
+  const dmgEv = (ev: FightEvent[]) => ev.filter((e): e is Extract<FightEvent, { k: 'dmg' }> => e.k === 'dmg');
+  const healEv = (ev: FightEvent[]) => ev.filter((e): e is Extract<FightEvent, { k: 'heal' }> => e.k === 'heal');
+
+  it('疾走: 30% faster for 10 s, on its own slot with a 60 s cooldown', () => {
+    const f = fight(['ranger'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 10);
+    clock += 500;
+    expect(f.move('p0', 6, 10, 0, clock)).not.toBeNull(); // 6 m in half a second is too far on foot
+    place(f, 'p0', 0, 10);
+    expect(f.use('p0', SPRINT_SLOT)).toBe('ok');
+    expect(f.speed(p)).toBeCloseTo(RULES.moveSpeed * 1.3);
+    clock += 500;
+    expect(f.move('p0', 6, 10, 0, clock)).toBeNull(); // sprinting it is fine
+    run(f, sec(10) + 1);
+    expect(f.speed(p)).toBe(RULES.moveSpeed);
+    expect(f.use('p0', SPRINT_SLOT)).toBe('cd');
+  });
+
+  it('卸力 and 蝕力咒 make the enemy hit softer, 10% each', () => {
+    const f = fight(['guardian', 'brawler', 'sorcerer'], { calm: false });
+    place(f, 'p0', 0, 4);
+    place(f, 'p1', 0, -3.4);
+    place(f, 'p2', 0, 12);
+    boss(f).enmity.set('p0', 1e9);
+    expect(f.use('p1', 7)).toBe('ok'); // 卸力
+    expect(f.use('p2', 9)).toBe('ok'); // 蝕力咒
+    const hit = dmgEv(run(f, sec(PRACTICE.autoEvery))).find((e) => e.t === 'p0');
+    expect(hit!.a).toBe(Math.round(500 * 0.9 * 0.9));
+  });
+
+  it('戰嚎 makes every hit a critical direct hit; 八方步 gives the positional from the front', () => {
+    const f = fight(['berserker', 'brawler'], { calm: true });
+    place(f, 'p0', 0, 4);
+    expect(f.use('p0', 8)).toBe('ok'); // 戰嚎
+    run(f, RULES.lock);
+    const hits: Extract<FightEvent, { k: 'dmg' }>[] = [];
+    for (let k = 0; k < 2; k++) {
+      f.use('p0', 0);
+      hits.push(...dmgEv(run(f, RULES.gcd)).filter((e) => e.s === 'p0'));
+    }
+    expect(hits.length).toBeGreaterThan(1);
+    expect(hits.every((e) => e.c && e.dh)).toBe(true);
+    place(f, 'p1', 0, 3.4); // in front of the dummy
+    expect(f.use('p1', 8)).toBe('ok'); // 八方步
+    run(f, RULES.lock);
+    expect(f.use('p1', 2)).toBe('ok'); // 崩山拳, rear +150
+    expect(dmgEv(run(f, 2)).find((e) => e.s === 'p1')!.pos).toBe(1);
+  });
+
+  it('晨光恩典 raises my healing 25%, 星輝 my shields too', () => {
+    const f = fight(['priest', 'warden', 'guardian'], { calm: true });
+    place(f, 'p0', 0, 10);
+    place(f, 'p1', 2, 10);
+    place(f, 'p2', 0, 4);
+    f.players.get('p2')!.hp = 2000;
+    expect(f.use('p0', 7)).toBe('ok'); // 晨光恩典
+    run(f, RULES.lock);
+    expect(f.use('p0', 2)).toBe('ok'); // 光環禱言: 150 a second, paid every 3 s
+    const tick = healEv(run(f, sec(2) + RULES.dotTick + 1)).find((e) => e.s === 'p0' && e.hot && e.t === 'p2');
+    expect(tick!.a).toBe(Math.round(150 * 3 * (1 + RULES.det) * 1.25));
+    expect(f.use('p1', 7)).toBe('ok'); // 星輝
+    run(f, RULES.lock);
+    expect(f.use('p1', 8, { target: 'p2' })).toBe('ok'); // 星辰守護: 3,000 shield
+    const guard = f.players.get('p2')!.statuses.find((x) => x.id === 'starGuardShield')!;
+    expect(guard.v).toBe(Math.round(3000 * (1 + RULES.det) * 1.25));
+  });
+
+  it('歸泉 needs my 魔力湧泉 and blinks back to it; 焰影步 blinks next to an ally', () => {
+    const f = fight(['sorcerer', 'guardian'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 10);
+    place(f, 'p1', 6, 4);
+    expect(f.use('p0', 6)).toBe('zone');
+    expect(f.use('p0', 3)).toBe('ok'); // 魔力湧泉 at (0, 10)
+    run(f, RULES.lock);
+    place(f, 'p0', 8, 14);
+    expect(f.use('p0', 6)).toBe('ok'); // 歸泉
+    run(f, sec(0.25) + 2);
+    expect(Math.hypot(p.x, p.z - 10)).toBeLessThan(0.05);
+    run(f, RULES.lock);
+    expect(f.use('p0', 5, { target: 'p1' })).toBe('ok'); // 焰影步
+    run(f, sec(0.25) + 2);
+    expect(Math.hypot(p.x - 6, p.z - 4)).toBeLessThan(1.1);
+    expect(f.use('p0', 5, { target: 'p0' })).toBe('target'); // not onto myself
+  });
+
+  it('熱血庇護: the ally takes 20% less, and the berserker heals them with 30% of the damage', () => {
+    const f = fight(['berserker', 'guardian'], { calm: true });
+    place(f, 'p0', 0, 4);
+    place(f, 'p1', 2, 6);
+    f.players.get('p1')!.hp = 5000;
+    expect(f.use('p0', 7, { target: 'p1' })).toBe('ok');
+    run(f, RULES.lock);
+    expect(f.use('p0', 0)).toBe('ok');
+    const ev = run(f, 3);
+    const dealt = dmgEv(ev).find((e) => e.s === 'p0')!.a;
+    const healed = healEv(ev).find((e) => e.s === 'p0' && e.t === 'p1')!;
+    expect(healed.a).toBe(Math.round(dealt * 0.3 * (1 + RULES.det)));
+  });
+
+  it('rushes in with 盾衝 along the ground, and 焰幕 shields 30% of max HP', () => {
+    const f = fight(['guardian', 'sorcerer'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 15);
+    place(f, 'p1', 3, 15);
+    expect(f.use('p0', 6)).toBe('ok');
+    expect(p.statuses.some((x) => x.id === 'airborne')).toBe(false);
+    const ev = run(f, sec(0.3) + 2);
+    expect(damage(ev, 'p0')).toBeGreaterThan(0);
+    expect(reach(p.x, p.z, boss(f))).toBeLessThan(1.5);
+    expect(f.use('p1', 8)).toBe('ok'); // 焰幕
+    const veil = f.players.get('p1')!.statuses.find((x) => x.id === 'flameVeil')!;
+    expect(veil.v).toBe(Math.round(10_000 * 0.3 * (1 + RULES.det)));
   });
 });
 

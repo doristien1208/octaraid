@@ -1,5 +1,5 @@
 /** Shown on the entry screen and in /healthz, so a deployment can be checked at a glance. */
-export const VERSION = '0.4.3';
+export const VERSION = '0.5.0';
 
 /** The test machine gives this game port 3100; the Game Hub passes it in PORT as well. */
 export const DEFAULT_PORT = 3100;

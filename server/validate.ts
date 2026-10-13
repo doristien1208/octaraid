@@ -1,5 +1,5 @@
 import { VOTE_OPTIONS } from '../shared/encounters';
-import { isJobId } from '../shared/jobs';
+import { SPRINT_SLOT, isJobId } from '../shared/jobs';
 import type { C2S } from '../shared/protocol';
 
 const str = (v: unknown, max: number): string | null => (typeof v === 'string' && v.length <= max ? v : null);
@@ -58,7 +58,7 @@ export function parseC2S(raw: string): C2S | null {
     }
     case 'use': {
       const slot = m.s;
-      if (typeof slot !== 'number' || !Number.isInteger(slot) || slot < 0 || slot > 5) return null;
+      if (typeof slot !== 'number' || !Number.isInteger(slot) || slot < 0 || slot > SPRINT_SLOT) return null;
       const tg = m.tg === null || m.tg === undefined ? null : str(m.tg, 32);
       if (tg === null && m.tg !== null && m.tg !== undefined) return null;
       const dx = m.dx === undefined ? 0 : num(m.dx, 10);

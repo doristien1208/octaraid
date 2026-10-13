@@ -3,7 +3,22 @@
  * a few single keys (no combinations, no mouse). Keys are stored by their position on the keyboard
  * (KeyboardEvent.code), so a Chinese IME being on does not matter, and saved in this browser.
  */
-export type KeyAction = 'skill1' | 'skill2' | 'skill3' | 'skill4' | 'skill5' | 'lb' | 'chat' | 'view' | 'mute';
+export type KeyAction =
+  | 'skill1'
+  | 'skill2'
+  | 'skill3'
+  | 'skill4'
+  | 'skill5'
+  | 'skill6'
+  | 'skill7'
+  | 'skill8'
+  | 'skill9'
+  | 'skill10'
+  | 'sprint'
+  | 'lb'
+  | 'chat'
+  | 'view'
+  | 'mute';
 export type Bindings = Record<KeyAction, string[]>;
 
 export const KEY_ACTIONS: readonly { action: KeyAction; label: string; slots: number }[] = [
@@ -12,13 +27,20 @@ export const KEY_ACTIONS: readonly { action: KeyAction; label: string; slots: nu
   { action: 'skill3', label: '技能 3', slots: 2 },
   { action: 'skill4', label: '技能 4', slots: 2 },
   { action: 'skill5', label: '技能 5', slots: 2 },
+  { action: 'skill6', label: '技能 6', slots: 2 },
+  { action: 'skill7', label: '技能 7', slots: 2 },
+  { action: 'skill8', label: '技能 8', slots: 2 },
+  { action: 'skill9', label: '技能 9', slots: 2 },
+  { action: 'skill10', label: '技能 10', slots: 2 },
+  { action: 'sprint', label: '疾走', slots: 2 },
   { action: 'lb', label: '極限技（LB）', slots: 1 },
   { action: 'chat', label: '聊天', slots: 1 },
   { action: 'view', label: '切換俯視鏡頭', slots: 1 },
   { action: 'mute', label: '靜音', slots: 1 },
 ];
 
-export const SKILL_ACTIONS: readonly KeyAction[] = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5'];
+/** Hotbar slots 0–9 in key order (疾走 and the Limit Break have their own actions). */
+export const SKILL_ACTIONS: readonly KeyAction[] = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'skill7', 'skill8', 'skill9', 'skill10'];
 
 export const DEFAULT_BINDINGS: Readonly<Bindings> = {
   skill1: ['Digit1'],
@@ -26,6 +48,12 @@ export const DEFAULT_BINDINGS: Readonly<Bindings> = {
   skill3: ['Digit3'],
   skill4: ['Digit4'],
   skill5: ['Digit5'],
+  skill6: ['Digit6'],
+  skill7: ['Digit7'],
+  skill8: ['Digit8'],
+  skill9: ['Digit9'],
+  skill10: ['Digit0'],
+  sprint: ['ShiftLeft'],
   lb: ['KeyR'],
   chat: ['Enter'],
   view: ['KeyV'],
@@ -141,20 +169,33 @@ const fresh = (): Bindings => {
   return out;
 };
 
-/** Saved settings, checked again: anything broken (or tampered with) falls back to the defaults. */
+/**
+ * Saved settings, checked again: anything broken (or tampered with) falls back to the defaults. An
+ * action the save does not know yet (skills 6–10 and 疾走 came in v0.5) gets its default key, unless the
+ * player already put that key on something else; then it waits for one in the key settings.
+ */
 export function parseBindings(raw: string | null): Bindings {
   if (!raw) return fresh();
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
     let out = {} as Bindings;
     for (const { action } of KEY_ACTIONS) out[action] = [];
+    const missing: KeyAction[] = [];
     for (const { action, slots } of KEY_ACTIONS) {
       const list = v[action];
+      if (list === undefined) {
+        missing.push(action);
+        continue;
+      }
       if (!Array.isArray(list) || !list.length || list.length > slots) return fresh();
       for (const code of list) {
         if (typeof code !== 'string' || keyProblem(out, action, out[action].length, code)) return fresh();
         out = withKey(out, action, out[action].length, code);
       }
+    }
+    if (missing.length === KEY_ACTIONS.length) return fresh();
+    for (const action of missing) {
+      for (const code of DEFAULT_BINDINGS[action]) if (!keyProblem(out, action, out[action].length, code)) out = withKey(out, action, out[action].length, code);
     }
     return out;
   } catch {

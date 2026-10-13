@@ -2,6 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { VERSION } from '../shared/constants';
+import { LB_SLOT } from '../shared/jobs';
 import type { C2S, S2C } from '../shared/protocol';
 import { createApp } from '../server/app';
 
@@ -163,8 +164,8 @@ describe('server', () => {
     alice.send({ t: 'use', s: 1 }); // the guardian's 挑釁, at the nearest enemy
     const used = await bob.wait('snap', (m) => !!m.s.ev?.some((e) => e.k === 'use' && e.i === aw.id && e.s === 1));
     expect(used.s.e[0]!.t).toBe(aw.id); // the dummy turns on whoever provoked it
-    alice.send({ t: 'use', s: 5 }); // the Limit Break with an empty gauge
-    expect(await alice.wait('deny')).toMatchObject({ s: 5, why: 'lb' });
+    alice.send({ t: 'use', s: LB_SLOT }); // the Limit Break with an empty gauge
+    expect(await alice.wait('deny')).toMatchObject({ s: LB_SLOT, why: 'lb' });
 
     // only the host can end a test fight
     bob.send({ t: 'endtest' });

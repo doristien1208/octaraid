@@ -213,7 +213,7 @@ export interface GameResult {
 }
 
 /** Why a skill did not go off. */
-export type DenyReason = 'phase' | 'dead' | 'busy' | 'casting' | 'cd' | 'gcd' | 'target' | 'range' | 'lb';
+export type DenyReason = 'phase' | 'dead' | 'busy' | 'casting' | 'cd' | 'gcd' | 'target' | 'range' | 'lb' | 'zone';
 export const DENY_TEXT: Readonly<Record<DenyReason, string>> = {
   phase: '戰鬥還沒開始',
   dead: '倒地中無法行動',
@@ -224,6 +224,7 @@ export const DENY_TEXT: Readonly<Record<DenyReason, string>> = {
   target: '沒有可用的目標',
   range: '距離太遠',
   lb: '極限技量表未滿',
+  zone: '魔力湧泉不在場上',
 };
 
 export type C2S =
@@ -238,7 +239,7 @@ export type C2S =
   | { t: 'chat'; text: string }
   /** where my character is; the client moves itself and the server checks it */
   | { t: 'mv'; x: number; z: number; f: number }
-  /** a skill (0–4) or the Limit Break (5); tg: the chosen target; dx, dz: the direction I am moving */
+  /** a skill (0–9), the Limit Break (10) or 疾走 (11); tg: the chosen target; dx, dz: the direction I am moving */
   | { t: 'use'; s: number; tg?: string | null; dx?: number; dz?: number }
   | { t: 'endtest' }
   /** the host, on the results: the same duty again with the same party, or back to the waiting room */

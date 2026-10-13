@@ -2,7 +2,7 @@ import { scriptFor } from '../bosses';
 import { FOES, type FoeKind } from '../bosses/foes';
 import { RULES, TICK_RATE, sec } from '../constants';
 import type { Encounter } from '../encounters';
-import { LB_SLOT, LIMIT_BREAKS, ROLE_HP, jobById, type Fx, type Job, type JobId, type Role, type SkillInfo } from '../jobs';
+import { LB_SLOT, LIMIT_BREAKS, ROLE_HP, SPRINT_SLOT, jobById, skillAt, type Fx, type Job, type JobId, type Role, type SkillInfo } from '../jobs';
 import type { DenyReason, EndReason, FightEvent, GameResult, PlayerStats, SnapStatus, SnapTele, Snapshot } from '../protocol';
 import { Rng } from '../rng';
 import { STATUS, STATUS_IDS, type StatusId } from '../status';
@@ -233,7 +233,7 @@ export class Fight {
         reportedAt: -1,
         gcdAt: -999,
         gcdLen: RULES.gcd,
-        ready: [0, 0, 0, 0, 0],
+        ready: new Array<number>(SPRINT_SLOT + 1).fill(0),
         combo: 0,
         comboUntil: -1,
         lockUntil: 0,
@@ -277,7 +277,7 @@ export class Fight {
     const gap = p.reportedAt < 0 ? RULES.moveGap : Math.min(RULES.moveGap, Math.max(0, (nowMs - p.reportedAt) / 1000));
     p.reportedAt = nowMs;
     if (p.dead || this.stunned(p)) return Math.hypot(x - p.x, z - p.z) > 0.05 ? [p.x, p.z] : null;
-    const allowed = RULES.moveSpeed * gap * RULES.moveSlack + RULES.moveSlackM;
+    const allowed = this.speed(p) * gap * RULES.moveSlack + RULES.moveSlackM;
     let dx = x - p.x;
     let dz = z - p.z;
     const d = Math.hypot(dx, dz);
@@ -305,7 +305,7 @@ export class Fight {
    */
   use(id: string, slot: number, req: { target?: string | null; dx?: number; dz?: number } = {}): UseResult {
     const p = this.players.get(id);
-    if (!p || !Number.isInteger(slot) || slot < 0 || slot > LB_SLOT) return 'target';
+    if (!p || !Number.isInteger(slot) || slot < 0 || slot > SPRINT_SLOT) return 'target';
     if (this.phase !== 'fight') return 'phase';
     if (p.dead) return 'dead';
     if (this.stunned(p)) return 'busy';
@@ -384,10 +384,12 @@ export class Fight {
 
   private tryUse(p: Fighter, slot: number, want: string | null, dx: number, dz: number, mayQueue: boolean): UseResult {
     const lb = slot === LB_SLOT;
-    const skill = lb ? null : p.job.skills[slot]!;
+    const skill = lb ? null : skillAt(p.job, slot);
+    if (!lb && !skill) return 'target';
     const t = this.tick;
     // what can never work right now is refused at once, so the player hears why
     if (lb && (this.lb < 100 || (this.lbBy !== null && this.lbBy !== p.id))) return 'lb';
+    if (skill?.needsZone && !this.zones.some((z) => z.owner === p.id && z.s === skill.needsZone)) return 'zone';
     const kind = lb ? (p.role === 'dps' ? 'enemy' : 'self') : skill!.target;
     const range = lb ? Infinity : skill!.range;
     const target = this.pickTarget(p, kind, want, range);
@@ -421,6 +423,16 @@ export class Fight {
     if (kind === 'enemy') {
       if (wanted && 'enmity' in wanted && this.hittable(wanted)) return wanted;
       return this.nearestFoe(p) ?? 'target';
+    }
+    if (kind === 'other') {
+      if (wanted && 'job' in wanted) return wanted.dead || wanted === p ? 'target' : wanted;
+      // nobody chosen: the nearest living ally in reach
+      let best: Fighter | null = null;
+      for (const q of this.players.values()) {
+        if (q === p || q.dead || reach(p.x, p.z, this.body(q)) > range) continue;
+        if (!best || reach(p.x, p.z, this.body(q)) < reach(p.x, p.z, this.body(best))) best = q;
+      }
+      return best ?? 'target';
     }
     if (kind === 'ally') {
       if (wanted && 'job' in wanted) return wanted.dead ? 'target' : wanted;
@@ -488,14 +500,18 @@ export class Fight {
     const c = p.cast!;
     p.cast = null;
     const lb = c.slot === LB_SLOT;
-    const skill = lb ? null : p.job.skills[c.slot]!;
+    const skill = lb ? null : skillAt(p.job, c.slot)!;
     const target = c.target ? (this.players.get(c.target) ?? this.foes.find((f) => f.id === c.target) ?? null) : null;
     // the target may have changed while the cast ran: a dead enemy or ally, or a raised one
     const kind = lb ? (p.role === 'dps' ? 'enemy' : 'self') : skill!.target;
     const ok =
       kind === 'self' ||
       (target !== null &&
-        (kind === 'enemy' ? 'enmity' in target && this.hittable(target) : kind === 'ally' ? 'job' in target && !target.dead : 'job' in target && target.dead));
+        (kind === 'enemy'
+          ? 'enmity' in target && this.hittable(target)
+          : kind === 'ally' || kind === 'other'
+            ? 'job' in target && !target.dead
+            : 'job' in target && target.dead));
     if (!ok) {
       if (lb) this.lbBy = null;
       this.emit({ k: 'intr', i: p.id });
@@ -511,7 +527,7 @@ export class Fight {
     if (!c) return;
     p.cast = null;
     if (c.slot === LB_SLOT) this.lbBy = null;
-    else if (p.job.skills[c.slot]!.kind === 'gcd') p.gcdAt = -999;
+    else if (skillAt(p.job, c.slot)?.kind === 'gcd') p.gcdAt = -999;
     this.emit({ k: 'intr', i: p.id });
   }
 
@@ -521,7 +537,7 @@ export class Fight {
       this.limitBreak(p, target);
       return;
     }
-    const skill = p.job.skills[slot]!;
+    const skill = skillAt(p.job, slot)!;
     let fx = skill.fx;
     let step: number | undefined;
     if (skill.combo) {
@@ -547,12 +563,13 @@ export class Fight {
           let p0 = fx.p;
           let pos: 0 | 1 | undefined;
           if (fx.rear || fx.flank) {
-            const side = sideOf(foe, p.x, p.z);
+            // 八方步: the bonus counts from any side
+            const side = p.statuses.some((s) => STATUS[s.id].trueNorth) ? (fx.rear ? 'rear' : 'flank') : sideOf(foe, p.x, p.z);
             const bonus = side === 'rear' ? fx.rear : side === 'flank' ? fx.flank : undefined;
             pos = bonus ? 1 : 0;
             p0 += bonus ?? 0;
           }
-          this.damageFoe(p, foe, p0, slot, { pos });
+          this.damageFoe(p, foe, p0, slot, { pos, enmity: fx.enmity });
           break;
         }
         case 'circle': {
@@ -644,14 +661,33 @@ export class Fight {
         }
         case 'leap': {
           if (!foe) return;
-          // land at the edge of the target's ring, on my side of it
+          // land at the edge of the target's ring, on my side of it (a rush stops just outside it)
           const d = Math.hypot(p.x - foe.x, p.z - foe.z) || 1;
-          const edge = Math.max(0, foe.r - 0.2);
+          const edge = fx.ground ? foe.r + 1 : Math.max(0, foe.r - 0.2);
           const [x1, z1] = clampToArena(this.enc.arena, foe.x + ((p.x - foe.x) / d) * edge, foe.z + ((p.z - foe.z) / d) * edge);
           this.startDash(p, x1, z1, fx.dur);
           p.dash!.then = { slot, fx: list.slice(i + 1), target: foe.id };
-          this.addStatus(p, { id: 'airborne', src: p.id, until: this.tick + sec(fx.dur), v: 0 }, false);
+          if (!fx.ground) this.addStatus(p, { id: 'airborne', src: p.id, until: this.tick + sec(fx.dur), v: 0 }, false);
           return;
+        }
+        case 'debuff':
+          if (foe && this.hittable(foe)) this.addStatus(foe, { id: fx.s, src: p.id, until: this.tick + sec(fx.dur), v: 0 }, false);
+          break;
+        case 'selfShield':
+          this.addShield(p, p, fx.s, this.maxHp(p) * fx.pct, fx.dur);
+          break;
+        case 'toAlly': {
+          if (!ally || ally === p) break;
+          // next to them, on my side
+          const d = Math.hypot(p.x - ally.x, p.z - ally.z) || 1;
+          const [x1, z1] = clampToArena(this.enc.arena, ally.x + ((p.x - ally.x) / d) * 1, ally.z + ((p.z - ally.z) / d) * 1);
+          this.startDash(p, x1, z1, fx.dur);
+          break;
+        }
+        case 'toZone': {
+          const z = this.zones.find((zone) => zone.owner === p.id && zone.s === fx.s);
+          if (z) this.startDash(p, z.x, z.z, fx.dur);
+          break;
         }
       }
     }
@@ -727,9 +763,11 @@ export class Fight {
 
   private damageFoe(p: Fighter, e: Foe, potency: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean }): void {
     let amount = potency * RULES.potency * (1 + RULES.det) * (1 + (this.rng.next() * 2 - 1) * RULES.variance);
-    const crit = this.rng.next() < RULES.critRate;
+    // 戰嚎: every hit is a critical and a direct hit (the draws still happen, so the random stream stays the same)
+    const sure = p.statuses.some((s) => STATUS[s.id].sureHit);
+    const crit = this.rng.next() < RULES.critRate || sure;
     if (crit) amount *= RULES.critMul;
-    const dh = this.rng.next() < RULES.dhRate;
+    const dh = this.rng.next() < RULES.dhRate || sure;
     if (dh) amount *= RULES.dhMul;
     amount *= this.damageMul(p);
     this.dealFoe(p, e, Math.max(1, Math.round(amount)), slot, { ...opts, crit, dh });
@@ -748,6 +786,11 @@ export class Fight {
     this.emit({ k: 'dmg', s: p.id, t: e.id, a: amount, c: opts.crit ? 1 : undefined, dh: opts.dh ? 1 : undefined, sk: slot, pos: opts.pos, dot: opts.dot ? 1 : undefined });
     const steal = this.statusSum(p, 'lifesteal');
     if (steal > 0 && !p.dead) this.heal(p, p, dealt * steal, false);
+    // 熱血庇護: my damage heals whoever holds mine
+    for (const q of this.players.values()) {
+      if (q.dead) continue;
+      for (const s of q.statuses) if (s.src === p.id && STATUS[s.id].link) this.heal(p, q, dealt * STATUS[s.id].link!, false);
+    }
   }
 
   /**
@@ -759,6 +802,8 @@ export class Fight {
     // 共鳴: a twin standing too close to the other hits harder, 10% a stack
     const res = src?.statuses.find((s) => s.id === 'resonance');
     if (res) raw *= 1 + 0.1 * res.v;
+    // 卸力, 蝕力咒: the enemy hits softer
+    for (const s of src?.statuses ?? []) if (STATUS[s.id].outMit) raw *= 1 - STATUS[s.id].outMit!;
     const n = this.hitName ?? undefined;
     if (q.statuses.some((s) => STATUS[s.id].invuln)) {
       this.emit({ k: 'dmg', s: src?.id ?? null, t: q.id, a: 0, iv: 1, n });
@@ -880,7 +925,7 @@ export class Fight {
   /** Heals a player; returns the HP actually restored. Healing makes enmity on every enemy. */
   private heal(src: Fighter | null, q: Fighter, raw: number, varies: boolean, hot = false, sk?: number): number {
     if (q.dead) return 0;
-    let amount = raw * (src ? this.echoMul(src) * (1 + RULES.det) : 1);
+    let amount = raw * (src ? this.echoMul(src) * (1 + RULES.det) * (1 + this.statusSum(src, 'healMul')) : 1);
     let crit = false;
     if (varies) {
       amount *= 1 + (this.rng.next() * 2 - 1) * RULES.variance;
@@ -901,7 +946,8 @@ export class Fight {
 
   private addShield(src: Fighter, q: Fighter, id: StatusId, amount: number, dur: number): void {
     if (q.dead) return;
-    this.addStatus(q, { id, src: src.id, until: this.tick + sec(dur), v: Math.round(amount * this.echoMul(src) * (1 + RULES.det)) }, false);
+    const mul = this.echoMul(src) * (1 + RULES.det) * (1 + this.statusSum(src, 'shieldMul'));
+    this.addStatus(q, { id, src: src.id, until: this.tick + sec(dur), v: Math.round(amount * mul) }, false);
   }
 
   /**
@@ -1145,7 +1191,14 @@ export class Fight {
     return p.statuses.some((s) => s.id === 'echo') ? 1 + this.echo * RULES.echoStep : 1;
   }
 
-  private statusSum(p: Fighter, key: 'lifesteal'): number {
+  /** How fast a player may walk now (疾走). */
+  speed(p: Fighter): number {
+    let mul = 1;
+    for (const s of p.statuses) mul = Math.max(mul, STATUS[s.id].speed ?? 1);
+    return RULES.moveSpeed * mul;
+  }
+
+  private statusSum(p: Fighter, key: 'lifesteal' | 'healMul' | 'shieldMul'): number {
     let v = 0;
     for (const s of p.statuses) v += STATUS[s.id][key] ?? 0;
     return v;

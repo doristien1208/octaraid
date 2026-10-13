@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { JOBS, ROLE_HP, jobById } from '../shared/jobs';
+import { JOBS, LB_SLOT, ROLE_HP, SKILL_COUNT, SPRINT_SLOT, jobById, skillAt } from '../shared/jobs';
 import { BASE_WEIGHT, ROLE_CAPS, hpScale, partyNotes, practiceParty, roleCounts, roleHasRoom } from '../shared/party';
 
 describe('jobs', () => {
-  it('are 2 tanks, 2 healers and 4 DPS with 5 skills each', () => {
+  it('are 2 tanks, 2 healers and 4 DPS with 10 skills each, plus 疾走', () => {
     expect(roleCounts(JOBS.map((j) => j.id))).toEqual({ tank: 2, healer: 2, dps: 4 });
-    for (const j of JOBS) expect(j.skills).toHaveLength(5);
+    for (const j of JOBS) expect(j.skills).toHaveLength(SKILL_COUNT);
+    for (const j of JOBS) expect(skillAt(j, SPRINT_SLOT)?.name).toBe('疾走');
+    for (const j of JOBS) expect(skillAt(j, LB_SLOT)).toBeNull();
   });
 
   it('keep the basic skill (key 1) free of cooldowns', () => {

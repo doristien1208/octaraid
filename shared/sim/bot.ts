@@ -1,5 +1,5 @@
 import { RULES, TICK_MS, TICK_RATE, sec } from '../constants';
-import type { JobId } from '../jobs';
+import { SPRINT_SLOT, type JobId } from '../jobs';
 import { STATUS } from '../status';
 import { angleDiff, clampToArena, reach, sideOf } from './arena';
 import type { Tele } from './boss';
@@ -558,7 +558,7 @@ export class Bot {
     const dz = gz - me.z;
     const d = Math.hypot(dx, dz);
     if (d < 0.15) return;
-    const step = Math.min(d, (RULES.moveSpeed * 0.95 * TICK_MS) / 1000);
+    const step = Math.min(d, (this.fight.speed(me) * 0.95 * TICK_MS) / 1000);
     let [ux, uz] = [dx / d, dz / d];
     const t = this.fight.tick;
     const bad = (this.fight.brain?.hazards() ?? []).filter(
@@ -599,6 +599,17 @@ export class Bot {
     const settled = Math.hypot(goal[0] - me.x, goal[1] - me.z) < (this.busy() ? 0.4 : 1.2);
     const boss = f.brain?.foe ?? f.foes.find((e) => e.boss) ?? focus;
     const sec3 = 3 * TICK_RATE;
+    const low = me.hp / f.maxHp(me) < 0.5;
+    const raidwide = boss.cast?.m === 'raidwide';
+    // my damage-over-time on what I attack: missing or about to run out
+    const dotLow = (id: string) => {
+      const s = focus.statuses.find((x) => x.id === id && x.src === me.id);
+      return !s || s.until - t < sec3;
+    };
+    const near = (r: number) => f.foes.filter((e) => f.hittable(e) && reach(me.x, me.z, e) <= r).length;
+
+    // 疾走 when the place I mean to be is far
+    if (ready(SPRINT_SLOT) && Math.hypot(goal[0] - me.x, goal[1] - me.z) > 8 && use(SPRINT_SLOT, null)) return false;
 
     if (me.role === 'tank') {
       const busterOnMe = boss.cast?.m === 'buster' && boss.cast.target === me.id;
@@ -613,15 +624,29 @@ export class Bot {
       // a buster marker on me (the second hit follows whoever is top: after a swap, that is me)
       const marked = !!f.brain?.hazards().some((h) => h.color === 'r' && h.end - t <= sec3 && f.brain!.holder(h)?.id === me.id);
       const second = (cracked(me) && f.topOf(boss)?.id === me.id) || (marked && !busterOnMe);
-      const low = me.hp / f.maxHp(me) < 0.85;
+      const hurt = me.hp / f.maxHp(me) < 0.85;
       // the big one just before the hit lands, so it still covers a second hit 4 s later
       const soon = busterOnMe && boss.cast!.end - t <= sec(1.2);
-      if ((second || (soon && low)) && !has('fortress', 'holmgang') && ready(3) && use(3, null)) return false;
+      if ((second || (soon && hurt)) && !has('fortress', 'holmgang') && ready(3) && use(3, null)) return false;
       if ((busterOnMe || second) && !has('rampart', 'bloodlust', 'fortress', 'holmgang')) for (const s of [2, 3]) if (ready(s) && use(s, null)) return false;
-      if (me.job.id === 'guardian' && boss.cast?.m === 'raidwide' && ready(4) && use(4, null)) return false;
+      // 守護之誓 / 熱血庇護 on whoever the buster is for: me on top of the other mitigation, or the other tank
+      const busted = boss.cast?.m === 'buster' ? f.players.get(boss.cast.target ?? '') : undefined;
+      if (busted && !busted.dead && ready(7) && !busted.statuses.some((s) => s.id === 'oath' || s.id === 'nascent') && use(7, busted.id)) return false;
+      if (me.job.id === 'guardian' && raidwide && ready(4) && use(4, null)) return false;
+      if (me.job.id === 'berserker' && low && ready(9) && use(9, null)) return false;
+      if (weave && inMelee && ready(8) && use(8, null)) return false;
+      // back to the boss after being thrown out (not while dodging)
+      if (!inMelee && reach(me.x, me.z, focus) > 5 && !this.busy() && ready(6) && use(6)) return false;
       if (gcdLeft > 0) return false;
       if (me.job.id === 'berserker' && ready(4) && inMelee && use(4, null)) return false;
+      // pick up adds: the guardian's circle when two are close, the berserker's axe at one that is on someone else
+      if (me.job.id === 'guardian' && near(5) >= 2 && use(5, null)) return false;
+      if (me.job.id === 'berserker') {
+        const loose = f.foes.find((e) => !e.boss && f.hittable(e) && f.topOf(e)?.role !== 'tank' && reach(me.x, me.z, e) <= 20);
+        if (loose && use(5, loose.id)) return false;
+      }
       if (inMelee) use(0);
+      else if (me.job.id === 'guardian' && settled && reach(me.x, me.z, focus) <= 25) use(9);
       return false;
     }
 
@@ -637,21 +662,41 @@ export class Bot {
       if (pct(lowest) < 0.35 && priest && ready(3) && use(3, lowest.id)) return false;
       if (busted && pct(busted) < 0.7 && priest && ready(3) && use(3, busted.id)) return false;
       if (!priest && avg < 0.8 && weave && ready(3) && use(3, null)) return false;
-      if (gcdLeft > 0 || !settled) return false;
+      // 晨光恩典 / 星輝 when the whole party is low
+      if (avg < 0.65 && weave && ready(7) && use(7, null)) return false;
+      if (priest && pct(lowest) < 0.55 && ready(9) && use(9, lowest.id)) return false;
+      if (!priest && busted && ready(8) && use(8, busted.id)) return false;
+      if (!priest && raidwide && weave && ready(9) && use(9, null)) return false;
+      // 迅唱 first, so the raise does not stand still for 6 seconds
+      if (fallen && ready(4) && ready(5) && weave && use(5, null)) return false;
+      if (gcdLeft > 0) return false;
+      const swift = me.statuses.some((s) => s.id === 'swift');
+      if (!settled && !swift) {
+        // moving: the instant damage-over-time is the one thing worth doing
+        if (dotLow(priest ? 'sunBurn' : 'starRot') && reach(me.x, me.z, focus) <= 25) use(6);
+        return false;
+      }
       if (fallen && ready(4)) return use(4, fallen.id);
       if (busted && pct(busted) < 0.98) return use(1, busted.id);
-      if (!priest && boss.cast?.m === 'raidwide' && ready(2)) return use(2, null);
+      if (!priest && raidwide && ready(2)) return use(2, null);
       if (avg < 0.8 && ready(2)) return use(2, null);
+      if (priest && avg < 0.75) return use(8, null);
       if (pct(lowest) < 0.8) return use(1, lowest.id);
+      if (dotLow(priest ? 'sunBurn' : 'starRot') && use(6)) return false;
       return use(0);
     }
 
     // DPS
     switch (me.job.id as JobId) {
       case 'brawler': {
+        if (this.dpsDefence(me, boss, weave, low, raidwide, ready, use)) return false;
         if (weave && ready(3) && use(3, null)) return false;
-        if (weave && ready(2) && inMelee && sideOf(focus, me.x, me.z) === 'rear' && use(2)) return false;
+        // 八方步 when the boss turned and 崩山拳 is waiting for its back
+        if (weave && ready(2) && ready(8) && inMelee && sideOf(focus, me.x, me.z) !== 'rear' && use(8, null)) return false;
+        const north = me.statuses.some((s) => s.id === 'trueNorth');
+        if (weave && ready(2) && inMelee && (north || sideOf(focus, me.x, me.z) === 'rear') && use(2)) return false;
         if (gcdLeft > 0 || !inMelee) return false;
+        if (near(5) >= 3 && use(5, null)) return false;
         if (ready(1) && (sideOf(focus, me.x, me.z) === 'flank' || !focus.boss)) {
           if (use(1)) this.lastFlank = t;
           return false;
@@ -660,7 +705,9 @@ export class Bot {
         return false;
       }
       case 'lancer': {
+        if (this.dpsDefence(me, boss, weave, low, raidwide, ready, use)) return false;
         if (weave && ready(3) && use(3, null)) return false;
+        if (weave && ready(5) && settled && !this.busy() && use(5)) return false;
         // the jump moves me: not while something is about to land
         if (weave && ready(2) && settled && !this.busy() && use(2)) return false;
         if (gcdLeft > 0 || !inMelee) return false;
@@ -669,21 +716,30 @@ export class Bot {
         return false;
       }
       case 'ranger': {
-        if (weave && ready(3) && boss.cast?.m === 'raidwide' && use(3, null)) return false;
+        if (low && ready(9) && use(9, null)) return false;
+        if (weave && ready(3) && raidwide && use(3, null)) return false;
+        if (weave && ready(5) && use(5, null)) return false;
+        if (weave && ready(8) && use(8, null)) return false;
+        if (weave && ready(7) && use(7)) return false;
         if (weave && ready(2) && use(2)) return false;
         // the backflip lands about 10 m further out, still in range; not while dodging
         if (weave && ready(4) && settled && !this.busy() && use(4)) return false;
         if (gcdLeft > 0) return false;
         if (ready(1) && use(1)) return false;
+        if (dotLow('venom') && use(6)) return false;
         use(0);
         return false;
       }
       case 'sorcerer': {
         const swift = me.statuses.some((s) => s.id === 'swift');
+        if ((raidwide || low) && weave && ready(8) && use(8, null)) return false;
+        if (raidwide && weave && ready(9) && !boss.statuses.some((s) => s.id === 'addle' || s.id === 'feint') && reach(me.x, me.z, boss) <= 25 && use(9, boss.id)) return false;
         if (weave && settled && ready(3) && !this.busy() && use(3, null)) return false;
         if (weave && ready(2) && this.readyIn(me, 4) < 45 && !swift && use(2, null)) return false;
         if (gcdLeft > 0) return false;
-        if (!settled && !swift) return false;
+        // moving: the instant 灼燒咒 keeps the damage going
+        if (!settled && !swift) return dotLow('scorch') ? use(7) : false;
+        if (dotLow('scorch') && use(7)) return false;
         if (ready(4)) return use(4);
         if (ready(1)) return use(1);
         return use(0);
@@ -691,6 +747,23 @@ export class Bot {
       default:
         return false;
     }
+  }
+
+  /** A melee DPS's own defence: 鐵身 / 龍鱗 when it hurts, 卸力 on the boss for a raid-wide, 回氣 when low. */
+  private dpsDefence(
+    me: Fighter,
+    boss: Foe,
+    weave: boolean,
+    low: boolean,
+    raidwide: boolean,
+    ready: (slot: number) => boolean,
+    use: (slot: number, target?: string | null) => boolean,
+  ): boolean {
+    if (low && ready(9) && use(9, null)) return true;
+    if (!weave) return false;
+    if ((raidwide || low) && ready(6) && use(6, null)) return true;
+    const soft = boss.statuses.some((s) => s.id === 'feint' || s.id === 'addle');
+    return raidwide && !soft && ready(7) && reach(me.x, me.z, boss) <= 10 && use(7, boss.id);
   }
 
   private readyIn(me: Fighter, slot: number): number {

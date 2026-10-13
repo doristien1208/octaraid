@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RULES, TICK_MS, TICK_RATE } from '../../shared/constants';
 import { encounterById, type Encounter } from '../../shared/encounters';
-import { LB_SLOT, LIMIT_BREAKS, jobById, type Fx, type Job, type SkillInfo } from '../../shared/jobs';
+import { LB_SLOT, LIMIT_BREAKS, SPRINT_SLOT, jobById, skillAt, type Fx, type Job, type SkillInfo } from '../../shared/jobs';
 import { FOES } from '../../shared/bosses/foes';
 import { DENY_TEXT, type C2S, type DenyReason, type FightEvent, type GameResult, type GameStartInfo, type SnapFoe, type SnapPlayer, type Snapshot } from '../../shared/protocol';
 import { angleDiff, clampToArena, faceTowards, reach } from '../../shared/sim/arena';
@@ -324,6 +324,14 @@ export class GameView {
     return !!mine?.st?.some((x) => STATUS[STATUS_IDS[x[0]]!]?.stun);
   }
 
+  /** My walking speed now, as the server allows it (疾走). */
+  private mySpeed(): number {
+    const mine = this.last?.p.find((p) => p.i === this.meId);
+    let mul = 1;
+    for (const x of mine?.st ?? []) mul = Math.max(mul, STATUS[STATUS_IDS[x[0]]!]?.speed ?? 1);
+    return RULES.moveSpeed * mul;
+  }
+
   private jobOf(id: string): Job | null {
     const p = this.info.players.find((x) => x.id === id);
     return p ? jobById(p.job) : null;
@@ -512,7 +520,7 @@ export class GameView {
     a?.setCasting(false);
     a?.playSkill(slot, step);
     const job = this.jobOf(id);
-    const skill = job?.skills[slot];
+    const skill = job ? skillAt(job, slot) : null;
     if (!job || !skill) return;
     const fxs: readonly Fx[] = skill.combo ? skill.combo[step % 3]! : skill.fx;
     const from = this.where(id);
@@ -548,6 +556,16 @@ export class GameView {
           break;
         case 'provoke':
           if (to) this.effects.burst(to.x, 3.4, to.z, 0.8, '#ff3b3b', 0.4);
+          break;
+        case 'debuff':
+          if (to) this.effects.burst(to.x, 2.4, to.z, 1.2, '#b06bff', 0.5);
+          break;
+        case 'selfShield':
+          this.effects.sparkle(from.x, from.z, '#9fd8ff', 8, 0.8);
+          break;
+        case 'toAlly':
+        case 'toZone':
+          this.effects.burst(from.x, 1, from.z, 1.4, color, 0.4);
           break;
         case 'partyHeal':
         case 'partyShield':
@@ -607,7 +625,7 @@ export class GameView {
     const p = this.info.players.find((x) => x.id === id);
     if (!p || sk === undefined) return '';
     const job = jobById(p.job);
-    return sk === LB_SLOT ? LIMIT_BREAKS[job.role].name : (job.skills[sk]?.name ?? '');
+    return sk === LB_SLOT ? LIMIT_BREAKS[job.role].name : (skillAt(job, sk)?.name ?? '');
   }
 
   private onLimitBreak(id: string, role: 'tank' | 'healer' | 'dps', s: Snapshot): void {
@@ -666,12 +684,21 @@ export class GameView {
     return list[(k + 1) % list.length]!.i;
   }
 
-  /** For the hotbar: is there something in range for each skill. */
+  /** For the hotbar, one per slot (0–9, the Limit Break, 疾走): is there something in range for each skill. */
   private slotStates(s: Snapshot): SlotState[] {
     const me = this.me;
-    return this.myJob.skills.map((sk) => {
-      if (!me) return 'ok';
+    return Array.from({ length: SPRINT_SLOT + 1 }, (_, slot): SlotState => {
+      const sk = skillAt(this.myJob, slot);
+      if (!me || !sk) return 'ok';
+      // 歸泉 needs my 魔力湧泉 on the floor
+      if (sk.needsZone && !s.zn?.some((z) => z.o === this.meId && STATUS_IDS[z.s] === sk.needsZone)) return 'target';
       if (sk.target === 'self') return 'ok';
+      if (sk.target === 'other') {
+        const t = s.p.find((p) => p.i === this.target && p.i !== this.meId && p.d !== 1);
+        const near = (p: SnapPlayer) => reach(me.x, me.z, { x: p.x, z: p.z, r: RULES.playerRadius }) <= sk.range;
+        if (t) return near(t) ? 'ok' : 'range';
+        return s.p.some((p) => p.i !== this.meId && p.d !== 1 && near(p)) ? 'ok' : 'target';
+      }
       if (sk.target === 'enemy') {
         const id = this.isFoe(this.target) ? this.target : this.nearestFoe(s);
         const e = s.e.find((x) => x.i === id);
@@ -734,6 +761,9 @@ export class GameView {
       case 'lb':
         this.useSkill(LB_SLOT);
         return;
+      case 'sprint':
+        this.useSkill(SPRINT_SLOT);
+        return;
       default: {
         const slot = SKILL_ACTIONS.indexOf(action);
         if (slot >= 0) this.useSkill(slot, e.repeat);
@@ -753,7 +783,7 @@ export class GameView {
     this.hud.pressSlot(slot);
     if (s.ph !== 1) return this.onDeny(slot, 'phase');
     if (this.dead) return this.onDeny(slot, 'dead');
-    const sk: SkillInfo | null = slot === LB_SLOT ? null : this.myJob.skills[slot]!;
+    const sk: SkillInfo | null = slot === LB_SLOT ? null : skillAt(this.myJob, slot);
     const kind = sk ? sk.target : this.myJob.role === 'dps' ? 'enemy' : 'self';
     let tg: string | null = this.target;
     const targetIsAlly = !!this.target && !this.isFoe(this.target);
@@ -765,6 +795,9 @@ export class GameView {
       }
     } else if (kind === 'ally') {
       if (!targetIsAlly || targetSnap?.d) tg = store.get(AUTO_HEAL_KEY) === 'off' ? this.meId : null;
+    } else if (kind === 'other') {
+      // a chosen ally other than me, or the server picks the nearest
+      if (!targetIsAlly || targetSnap?.d || this.target === this.meId) tg = null;
     } else if (kind === 'dead') {
       if (!targetIsAlly || !targetSnap?.d) tg = null;
     }
@@ -907,7 +940,7 @@ export class GameView {
     const [ix, iz] = this.inputDir();
     me.moving = ix !== 0 || iz !== 0;
     if (me.moving) {
-      const step = RULES.moveSpeed * dt;
+      const step = this.mySpeed() * dt;
       [me.x, me.z] = clampToArena(this.enc.arena, me.x + ix * step, me.z + iz * step);
       me.f += angleDiff(me.f, Math.atan2(ix, iz)) * Math.min(1, dt * 14);
     }

@@ -1,7 +1,7 @@
 import { hasBoss } from '../../shared/bosses';
 import { MAX_PLAYERS, RULES } from '../../shared/constants';
 import { ENCOUNTERS, KIND_NAMES, VOTE_OPTIONS, clock, difficultyName, optionLabel } from '../../shared/encounters';
-import { JOBS, LIMIT_BREAKS, ROLE_COLORS, ROLE_NAMES, jobById, type JobId, type Role } from '../../shared/jobs';
+import { JOBS, LIMIT_BREAKS, ROLE_COLORS, ROLE_NAMES, SPRINT, jobById, type JobId, type Role } from '../../shared/jobs';
 import { ROLE_CAPS, hpScale, partyNotes, roleCounts, roleHasRoom } from '../../shared/party';
 import type { C2S, RoomMember, RoomView } from '../../shared/protocol';
 import type { Tally } from '../../shared/vote';
@@ -225,11 +225,11 @@ export class RoomScreen {
         h(
           'tbody',
           null,
-          ...job.skills.map((s, k) =>
+          ...[...job.skills, SPRINT].map((s, k) =>
             h(
               'tr',
               null,
-              h('td', { class: 'key' }, String(k + 1)),
+              h('td', { class: 'key' }, k < 9 ? String(k + 1) : k === 9 ? '0' : '⇧'),
               h('td', null, h('strong', null, s.name), h('span', { class: 'muted small' }, ` ${s.kind === 'gcd' ? 'GCD' : '能力技'} · ${s.cast ? `詠唱 ${s.cast} 秒` : '瞬發'} · ${s.cd ? `CD ${s.cd} 秒` : '無 CD'}`)),
               h('td', { class: 'small' }, s.desc),
             ),

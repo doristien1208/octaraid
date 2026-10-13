@@ -1297,7 +1297,18 @@ p {
 
 .hud-hotbar {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.hb-row {
+  display: flex;
   gap: 8px;
+}
+
+.hud-hotbar .slot.sprint {
+  border-color: rgba(159, 232, 255, 0.6);
 }
 
 .hud-hotbar .slot {
@@ -1458,6 +1469,7 @@ p {
   position: absolute;
   right: 12px;
   bottom: 14px;
+  max-width: 300px;
   font-size: 11px;
   background: var(--hud-bg);
   padding: 3px 8px;
@@ -2201,7 +2213,7 @@ p {
 .hud-tip {
   position: absolute;
   right: 12px;
-  bottom: 44px;
+  bottom: 84px;
   width: 300px;
   background: rgba(20, 16, 40, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.25);

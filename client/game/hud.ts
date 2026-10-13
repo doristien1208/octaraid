@@ -1,11 +1,11 @@
 import { FOES } from '../../shared/bosses/foes';
 import { RULES, TICK_RATE } from '../../shared/constants';
 import { clock, difficultyName, encounterById } from '../../shared/encounters';
-import { LB_SLOT, LIMIT_BREAKS, jobById, type Job, type SkillInfo } from '../../shared/jobs';
+import { LB_SLOT, LIMIT_BREAKS, SPRINT_SLOT, jobById, skillAt, type Job, type SkillInfo } from '../../shared/jobs';
 import { END_NAMES, type FightEvent, type GameResult, type GameStartInfo, type SnapStatus, type Snapshot } from '../../shared/protocol';
 import { STATUS, STATUS_IDS } from '../../shared/status';
 import { h, isSubmitKey } from '../dom';
-import { SKILL_ACTIONS, keysText, type Bindings } from '../keys';
+import { SKILL_ACTIONS, keysText, type Bindings, type KeyAction } from '../keys';
 import { jobBadge } from '../ui/common';
 
 export interface HudActions {
@@ -100,7 +100,8 @@ export class Hud {
   private resultNote: HTMLElement | null = null;
   private host = false;
   private readonly hotbar = h('div', { class: 'hud-hotbar' });
-  private readonly slots: { el: HTMLElement; sweep: HTMLElement; num: HTMLElement }[] = [];
+  /** the hotbar's buttons with the slot each one shows (0–9, SPRINT_SLOT) */
+  private readonly slots: { el: HTMLElement; sweep: HTMLElement; num: HTMLElement; slot: number }[] = [];
   private readonly lbBox: HTMLElement;
   private readonly lbBar = h('i');
   private readonly lbPct = h('span');
@@ -268,28 +269,33 @@ export class Hud {
   }
 
 
-  /** Key labels on the hotbar and in the help line follow the key settings. */
+  /**
+   * Key labels on the hotbar and in the help line follow the key settings. Two rows as FF14's hotbars:
+   * skills 1–5 below, 6–10 and 疾走 above.
+   */
   setBindings(b: Bindings): void {
     const job = this.job;
     this.slots.length = 0;
+    const slotEl = (slot: number, action: KeyAction): HTMLElement => {
+      const s = job ? skillAt(job, slot) : null;
+      const sweep = h('i', { class: 'sweep' });
+      const num = h('em');
+      const el = h(
+        'div',
+        { class: `slot ${s?.kind ?? ''} ${slot === SPRINT_SLOT ? 'sprint' : ''}` },
+        sweep,
+        h('span', { class: 'key' }, keysText(b, action)),
+        h('span', { class: 'name' }, s?.name ?? ''),
+        h('span', { class: 'meta' }, s ? (s.kind === 'gcd' ? (s.cast ? `詠唱 ${s.cast}s` : 'GCD') : '能力技') : ''),
+        num,
+      );
+      if (s) this.hoverTip(el, () => skillTip(s));
+      this.slots.push({ el, sweep, num, slot });
+      return el;
+    };
     this.hotbar.replaceChildren(
-      ...SKILL_ACTIONS.map((action, k) => {
-        const s = job?.skills[k];
-        const sweep = h('i', { class: 'sweep' });
-        const num = h('em');
-        const el = h(
-          'div',
-          { class: `slot ${s?.kind ?? ''}` },
-          sweep,
-          h('span', { class: 'key' }, keysText(b, action)),
-          h('span', { class: 'name' }, s?.name ?? ''),
-          h('span', { class: 'meta' }, s ? (s.kind === 'gcd' ? (s.cast ? `詠唱 ${s.cast}s` : 'GCD') : '能力技') : ''),
-          num,
-        );
-        if (s) this.hoverTip(el, () => skillTip(s));
-        this.slots.push({ el, sweep, num });
-        return el;
-      }),
+      h('div', { class: 'hb-row' }, ...[5, 6, 7, 8, 9].map((k) => slotEl(k, SKILL_ACTIONS[k]!)), slotEl(SPRINT_SLOT, 'sprint')),
+      h('div', { class: 'hb-row' }, ...[0, 1, 2, 3, 4].map((k) => slotEl(k, SKILL_ACTIONS[k]!))),
     );
     this.lbKey.textContent = keysText(b, 'lb');
     this.help.textContent = `W A S D 移動 · 拖曳轉鏡頭 · 滾輪縮放 · Tab 選敵人 · F1–F8 選隊友 · Esc 取消目標 · ${keysText(b, 'view')} 俯視 · ${keysText(b, 'chat')} 聊天 · `;
@@ -304,7 +310,7 @@ export class Hud {
 
   /** Flashes a hotbar slot (or the LB box) when its key is pressed. */
   pressSlot(k: number): void {
-    const el = k === LB_SLOT ? this.lbBox : this.slots[k]?.el;
+    const el = k === LB_SLOT ? this.lbBox : this.slots.find((x) => x.slot === k)?.el;
     if (!el) return;
     el.classList.remove('press');
     void el.offsetWidth; // restart the animation
@@ -469,7 +475,7 @@ export class Hud {
       this.myHpText.textContent = me.d ? '倒地：等待補師復活' : `HP ${me.hp.toLocaleString()} / ${me.mh.toLocaleString()}${me.sh ? `（護盾 ${me.sh.toLocaleString()}）` : ''}`;
       paint(this.myStatus, stKey(me.st, true), () => statusIcons(me.st, 10, true));
       const cast = me.c;
-      const castName = cast ? (cast[0] === LB_SLOT && this.job ? LIMIT_BREAKS[this.job.role].name : (this.job?.skills[cast[0]]?.name ?? '')) : '';
+      const castName = cast ? (cast[0] === LB_SLOT && this.job ? LIMIT_BREAKS[this.job.role].name : this.job ? (skillAt(this.job, cast[0])?.name ?? '') : '') : '';
       this.castBar(this.myCast, cast ? { name: castName, left: cast[1], total: cast[2] } : null);
       this.paintSlots(me.g, me.cd, me.cb, me.d === 1 || s.ph !== 1, slots);
     }
@@ -493,8 +499,9 @@ export class Hud {
   private paintSlots(g: [number, number], cd: number[], combo: number, off: boolean, states: SlotState[]): void {
     const job = this.job;
     if (!job) return;
-    this.slots.forEach(({ el, sweep, num }, k) => {
-      const s = job.skills[k]!;
+    this.slots.forEach(({ el, sweep, num, slot: k }) => {
+      const s = skillAt(job, k);
+      if (!s) return;
       const own = cd[k] ?? 0;
       const gcd = s.kind === 'gcd' ? g[0] : 0;
       const left = Math.max(own, gcd);

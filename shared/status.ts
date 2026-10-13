@@ -33,7 +33,32 @@ export type StatusId =
   | 'red'
   | 'blue'
   | 'resonance'
-  | 'sealed';
+  | 'sealed'
+  // the 10-skill kits (v0.5)
+  | 'sprint'
+  | 'trueNorth'
+  | 'feint'
+  | 'addle'
+  | 'ironBody'
+  | 'dragonScale'
+  | 'flameVeil'
+  | 'oath'
+  | 'nascent'
+  | 'oathBlade'
+  | 'warCry'
+  | 'thrill'
+  | 'dawnGrace'
+  | 'starGlow'
+  | 'starGuard'
+  | 'starGuardShield'
+  | 'starRing'
+  | 'starRingShield'
+  | 'warSong'
+  | 'hawkEye'
+  | 'sunBurn'
+  | 'starRot'
+  | 'venom'
+  | 'scorch';
 
 export interface StatusInfo {
   name: string;
@@ -77,6 +102,19 @@ export interface StatusInfo {
   zoneHot?: number;
   /** goes away when the owner uses any action */
   breakOnAction?: boolean;
+  /** moving speed × this */
+  speed?: number;
+  /** on an enemy: the damage it deals × (1 − outMit) */
+  outMit?: number;
+  /** the heals (healMul) and shields (shieldMul) its owner gives × (1 + value) */
+  healMul?: number;
+  shieldMul?: number;
+  /** every hit is a critical and a direct hit */
+  sureHit?: boolean;
+  /** positionals count from any side */
+  trueNorth?: boolean;
+  /** this share of the damage the status's source deals heals its holder */
+  link?: number;
 }
 
 export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
@@ -113,6 +151,31 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   blue: { name: '凍氣印記', icon: '冰', good: false, desc: '藍色：只能進藍色的分攤' },
   resonance: { name: '共鳴', icon: '鳴', good: true, desc: '兩王相距太近：造成的傷害每層 +10%' },
   sealed: { name: '待合體', icon: '封', good: true, desc: '血量降到 30%：不再受傷，等另一隻也到 30% 就合體' },
+  // the 10-skill kits (v0.5)
+  sprint: { name: '疾走', icon: '疾', good: true, desc: '移動速度 +30%', speed: 1.3 },
+  trueNorth: { name: '八方步', icon: '步', good: true, desc: '不必站背面或側面也有身位加成', trueNorth: true },
+  feint: { name: '卸力', icon: '卸', good: false, desc: '造成的傷害 −10%', outMit: 0.1 },
+  addle: { name: '蝕力咒', icon: '蝕', good: false, desc: '造成的傷害 −10%', outMit: 0.1 },
+  ironBody: { name: '鐵身', icon: '鐵', good: true, desc: '受到的傷害 −20%', mit: 0.2 },
+  dragonScale: { name: '龍鱗', icon: '鱗', good: true, desc: '吸收傷害的護盾', shield: true },
+  flameVeil: { name: '焰幕', icon: '幕', good: true, desc: '吸收傷害的護盾', shield: true },
+  oath: { name: '守護之誓', icon: '守', good: true, desc: '受到的傷害 −20%', mit: 0.2 },
+  nascent: { name: '熱血庇護', icon: '熱', good: true, desc: '受到的傷害 −20%；裂地狂斧造成的傷害 30% 回復自己', mit: 0.2, link: 0.3 },
+  oathBlade: { name: '誓約之刃', icon: '刃', good: true, desc: '傷害 +20%', dmg: 0.2 },
+  warCry: { name: '戰嚎', icon: '嚎', good: true, desc: '攻擊必定暴擊且直擊', sureHit: true },
+  thrill: { name: '狂血', icon: '狂', good: true, desc: '最大 HP +20%', maxHp: 0.2 },
+  dawnGrace: { name: '晨光恩典', icon: '恩', good: true, desc: '治療量 +25%', healMul: 0.25 },
+  starGlow: { name: '星輝', icon: '輝', good: true, desc: '治療量與護盾量 +25%', healMul: 0.25, shieldMul: 0.25 },
+  starGuard: { name: '星辰守護', icon: '辰', good: true, desc: '受到的傷害 −15%', mit: 0.15 },
+  starGuardShield: { name: '星辰守護', icon: '辰', good: true, desc: '吸收傷害的護盾', shield: true },
+  starRing: { name: '星環結界', icon: '結', good: true, desc: '受到的傷害 −10%', mit: 0.1 },
+  starRingShield: { name: '星環結界', icon: '結', good: true, desc: '吸收傷害的護盾', shield: true },
+  warSong: { name: '戰歌', icon: '奏', good: true, desc: '傷害 +5%', dmg: 0.05 },
+  hawkEye: { name: '鷹眼凝神', icon: '鷹', good: true, desc: '傷害 +10%', dmg: 0.1 },
+  sunBurn: { name: '烈日灼燒', icon: '灼', good: false, desc: '每秒受到持續傷害', dot: true },
+  starRot: { name: '星蝕', icon: '腐', good: false, desc: '每秒受到持續傷害', dot: true },
+  venom: { name: '毒牙箭', icon: '毒', good: false, desc: '每秒受到持續傷害', dot: true },
+  scorch: { name: '灼燒咒', icon: '燒', good: false, desc: '每秒受到持續傷害', dot: true },
 };
 
 export const STATUS_IDS = Object.keys(STATUS) as StatusId[];
