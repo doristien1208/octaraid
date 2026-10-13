@@ -48,7 +48,7 @@ export const ENCOUNTERS: readonly Encounter[] = [
     arena: { shape: 'circle', size: 20 },
     learn: '形狀、讀條、死刑、分攤與分散',
     desc: '峽谷平台上的岩石巨人。入門關：先學會看地面預兆與讀條名稱。',
-    // Hard was 6:00 / 7:00 until play-testers cleared it at 4:25 with nearly 2:35 to spare (v0.4.1)
+    // Hard was 6:00 / 7:00 until play-testers cleared it at 4:25 with 2:35 to spare (v0.4.1)
     times: { normal: { target: 240, enrage: 360 }, hard: { target: 285, enrage: 330 } },
     hp: { normal: 640_000, hard: 900_000 },
     theme: { sky: '#e9b98a', floor: '#c9925c', floorLine: '#9e6b3e', edge: '#7a4f2e', outside: '#5c3d27' },
@@ -71,7 +71,8 @@ export const ENCOUNTERS: readonly Encounter[] = [
     },
     learn: '連線、踩塔、地火、躲柱子',
     desc: '冰湖上的浮空魔女，四個斜角各有一根可以遮蔽的冰柱。',
-    times: { normal: { target: 300, enrage: 420 }, hard: { target: 390, enrage: 450 } },
+    // Hard was 6:30 / 7:30; computer parties cleared with 2 minutes or more to spare (v0.4.2)
+    times: { normal: { target: 300, enrage: 420 }, hard: { target: 315, enrage: 360 } },
     hp: { normal: 800_000, hard: 950_000 },
     theme: { sky: '#b9dcf2', floor: '#d6ecf7', floorLine: '#8fbcd8', edge: '#6aa3c8', outside: '#e8f4fb' },
   },
@@ -83,7 +84,8 @@ export const ENCOUNTERS: readonly Encounter[] = [
     arena: { shape: 'square', size: 18, grid: 6 },
     learn: '換坦、計時炸彈、八方站位、地板',
     desc: '6 × 6 格的機械地板，格子會通電；四足機械守衛把守城門。',
-    times: { normal: { target: 300, enrage: 420 }, hard: { target: 390, enrage: 450 } },
+    // Hard was 6:30 / 7:30; computer parties cleared with 2 minutes or more to spare (v0.4.2)
+    times: { normal: { target: 300, enrage: 420 }, hard: { target: 315, enrage: 360 } },
     hp: { normal: 840_000, hard: 1_000_000 },
     theme: { sky: '#3b4255', floor: '#6c7486', floorLine: '#a8b0c2', edge: '#3a3f4d', outside: '#2a2e38' },
   },
@@ -95,7 +97,8 @@ export const ENCOUNTERS: readonly Encounter[] = [
     arena: { shape: 'circle', size: 22 },
     learn: '雙王、血量分配、顏色機制、合體',
     desc: '紅色的熾核與藍色的凍核，兩王太靠近會共鳴；最後合體成雙極機神。',
-    times: { normal: { target: 330, enrage: 450 }, hard: { target: 420, enrage: 480 } },
+    // Hard was 7:00 / 8:00 (v0.4.2 tightened it with the others)
+    times: { normal: { target: 330, enrage: 450 }, hard: { target: 345, enrage: 390 } },
     hp: { normal: 900_000, hard: 1_050_000 },
     theme: { sky: '#2b2440', floor: '#4b4466', floorLine: '#8e83b8', edge: '#2a2338', outside: '#1c1828' },
   },

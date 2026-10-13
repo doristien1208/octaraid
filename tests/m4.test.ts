@@ -56,10 +56,18 @@ for (const id of ['frostwitch', 'gatekeeper', 'twins'] as const) {
       }
     }, 120_000);
 
-    it('is clearable on Hard by a 4-player party with a tank and a healer', () => {
+    it('is clearable on Hard by a 4-player party with a tank and a healer, with time to spare before the enrage', () => {
       // the raid floors are meant to be harder than the first trial: the bots clear them about 2 times in 3
       let clears = 0;
-      for (const jobs of HARD) for (const seed of [1, 2, 3]) if (party(id, jobs, true, seed).r.reason === 'clear') clears++;
+      for (const jobs of HARD) {
+        for (const seed of [1, 2, 3]) {
+          const { r } = party(id, jobs, true, seed);
+          if (r.reason !== 'clear') continue;
+          clears++;
+          // tight but fair: a clean party still has about half a minute or more
+          expect(r.time, `${jobs.join(',')} seed ${seed}`).toBeLessThan(enc.times.hard.enrage - 30);
+        }
+      }
       expect(clears).toBeGreaterThanOrEqual(id === 'frostwitch' ? 5 : 4);
     }, 180_000);
 
