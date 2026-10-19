@@ -9,7 +9,9 @@ import { angleDiff, clampToArena, faceTowards, reach } from '../../shared/sim/ar
 import { STATUS, STATUS_IDS } from '../../shared/status';
 import type { Audio } from '../audio';
 import { h, store, toast } from '../dom';
-import { MOVE_KEYS, SKILL_ACTIONS, actionOf, loadBindings, type Bindings, type MoveKey } from '../keys';
+import { loadLayout, type Layout } from '../hotbar';
+import { BAR_ACTIONS, MOVE_KEYS, actionOf, loadBindings, type Bindings, type MoveKey } from '../keys';
+import { hotbarEditor } from '../ui/hotbar-editor';
 import { AUTO_HEAL_KEY, loadQuality, pixelRatioFor, settingsModal } from '../ui/common';
 import { buildArena, type ArenaView } from './arena';
 import { loadModels, loadedModels } from './assets';
@@ -63,6 +65,8 @@ export class GameView {
   private readonly effects = new Effects();
   private readonly enc: Encounter;
   private readonly myJob: Job;
+  /** which skill sits on which hotbar slot (the player's own layout for this job) */
+  private layout: Layout;
   private readonly avatars = new Map<string, Avatar>();
   private readonly names = new Map<string, string>();
   /** the last thing that hit each player, for 倒下了（…）in the combat log */
@@ -110,9 +114,17 @@ export class GameView {
       chat: (text) => link.send({ t: 'chat', text }),
       leave: () => link.leave(),
       endTest: () => link.send({ t: 'endtest' }),
-      settings: () => settingsModal(audio, () => this.reloadKeys()),
+      settings: () => settingsModal(audio, () => this.reloadKeys(), this.myJob.id),
       target: (id) => this.pick(id),
+      use: (slot) => this.useSkill(slot),
+      editBar: () =>
+        hotbarEditor(this.myJob.id, (layout) => {
+          this.layout = layout;
+          this.hud.setLayout(layout);
+        }),
     });
+    this.layout = loadLayout(this.myJob.id);
+    this.hud.setLayout(this.layout);
     this.hud.setBindings(this.bindings);
     this.root = h('div', { class: 'game' }, canvas, this.labels.domElement, this.hud.el);
 
@@ -746,7 +758,10 @@ export class GameView {
     const action = actionOf(this.bindings, e.code);
     if (!action) return;
     e.preventDefault();
-    if (e.repeat && action !== 'skill1') return; // holding the basic skill keeps it going (see useSkill)
+    // a hotbar key uses whatever skill the player put on that slot
+    const pos = BAR_ACTIONS.indexOf(action);
+    const skill = pos >= 0 ? (this.layout[pos] ?? null) : null;
+    if (e.repeat && skill !== 0) return; // holding the basic skill keeps it going (see useSkill)
     switch (action) {
       case 'chat':
         this.held.clear();
@@ -761,13 +776,8 @@ export class GameView {
       case 'lb':
         this.useSkill(LB_SLOT);
         return;
-      case 'sprint':
-        this.useSkill(SPRINT_SLOT);
-        return;
-      default: {
-        const slot = SKILL_ACTIONS.indexOf(action);
-        if (slot >= 0) this.useSkill(slot, e.repeat);
-      }
+      default:
+        if (skill !== null) this.useSkill(skill, e.repeat);
     }
   };
 
@@ -825,6 +835,8 @@ export class GameView {
 
   private reloadKeys(): void {
     this.bindings = loadBindings();
+    this.layout = loadLayout(this.myJob.id);
+    this.hud.setLayout(this.layout);
     this.hud.setBindings(this.bindings);
   }
 

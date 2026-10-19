@@ -1,20 +1,23 @@
 /**
  * Key settings. Moving always uses W A S D and the arrow keys; every other action can be rebound, each to
- * a few single keys (no combinations, no mouse). Keys are stored by their position on the keyboard
- * (KeyboardEvent.code), so a Chinese IME being on does not matter, and saved in this browser.
+ * a few single keys (no combinations, no mouse). Keys belong to the 12 hotbar slots, not to skills: which
+ * skill sits in which slot is the player's own layout per job (client/hotbar.ts). Keys are stored by their
+ * position on the keyboard (KeyboardEvent.code), so a Chinese IME being on does not matter, and saved in
+ * this browser.
  */
 export type KeyAction =
-  | 'skill1'
-  | 'skill2'
-  | 'skill3'
-  | 'skill4'
-  | 'skill5'
-  | 'skill6'
-  | 'skill7'
-  | 'skill8'
-  | 'skill9'
-  | 'skill10'
-  | 'sprint'
+  | 'bar1'
+  | 'bar2'
+  | 'bar3'
+  | 'bar4'
+  | 'bar5'
+  | 'bar6'
+  | 'bar7'
+  | 'bar8'
+  | 'bar9'
+  | 'bar10'
+  | 'bar11'
+  | 'bar12'
   | 'lb'
   | 'chat'
   | 'view'
@@ -22,38 +25,40 @@ export type KeyAction =
 export type Bindings = Record<KeyAction, string[]>;
 
 export const KEY_ACTIONS: readonly { action: KeyAction; label: string; slots: number }[] = [
-  { action: 'skill1', label: '技能 1（基礎）', slots: 2 },
-  { action: 'skill2', label: '技能 2', slots: 2 },
-  { action: 'skill3', label: '技能 3', slots: 2 },
-  { action: 'skill4', label: '技能 4', slots: 2 },
-  { action: 'skill5', label: '技能 5', slots: 2 },
-  { action: 'skill6', label: '技能 6', slots: 2 },
-  { action: 'skill7', label: '技能 7', slots: 2 },
-  { action: 'skill8', label: '技能 8', slots: 2 },
-  { action: 'skill9', label: '技能 9', slots: 2 },
-  { action: 'skill10', label: '技能 10', slots: 2 },
-  { action: 'sprint', label: '疾走', slots: 2 },
+  { action: 'bar1', label: '熱鍵 1', slots: 2 },
+  { action: 'bar2', label: '熱鍵 2', slots: 2 },
+  { action: 'bar3', label: '熱鍵 3', slots: 2 },
+  { action: 'bar4', label: '熱鍵 4', slots: 2 },
+  { action: 'bar5', label: '熱鍵 5', slots: 2 },
+  { action: 'bar6', label: '熱鍵 6', slots: 2 },
+  { action: 'bar7', label: '熱鍵 7', slots: 2 },
+  { action: 'bar8', label: '熱鍵 8', slots: 2 },
+  { action: 'bar9', label: '熱鍵 9', slots: 2 },
+  { action: 'bar10', label: '熱鍵 10', slots: 2 },
+  { action: 'bar11', label: '熱鍵 11', slots: 2 },
+  { action: 'bar12', label: '熱鍵 12', slots: 2 },
   { action: 'lb', label: '極限技（LB）', slots: 1 },
   { action: 'chat', label: '聊天', slots: 1 },
   { action: 'view', label: '切換俯視鏡頭', slots: 1 },
   { action: 'mute', label: '靜音', slots: 1 },
 ];
 
-/** Hotbar slots 0–9 in key order (疾走 and the Limit Break have their own actions). */
-export const SKILL_ACTIONS: readonly KeyAction[] = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'skill7', 'skill8', 'skill9', 'skill10'];
+/** The 12 hotbar slots in order (bottom row 1–6, top row 7–12). */
+export const BAR_ACTIONS: readonly KeyAction[] = ['bar1', 'bar2', 'bar3', 'bar4', 'bar5', 'bar6', 'bar7', 'bar8', 'bar9', 'bar10', 'bar11', 'bar12'];
 
 export const DEFAULT_BINDINGS: Readonly<Bindings> = {
-  skill1: ['Digit1'],
-  skill2: ['Digit2'],
-  skill3: ['Digit3'],
-  skill4: ['Digit4'],
-  skill5: ['Digit5'],
-  skill6: ['Digit6'],
-  skill7: ['Digit7'],
-  skill8: ['Digit8'],
-  skill9: ['Digit9'],
-  skill10: ['Digit0'],
-  sprint: ['ShiftLeft'],
+  bar1: ['Digit1'],
+  bar2: ['Digit2'],
+  bar3: ['Digit3'],
+  bar4: ['Digit4'],
+  bar5: ['Digit5'],
+  bar6: ['Digit6'],
+  bar7: ['Digit7'],
+  bar8: ['Digit8'],
+  bar9: ['Digit9'],
+  bar10: ['Digit0'],
+  bar11: ['Minus'],
+  bar12: ['ShiftLeft'],
   lb: ['KeyR'],
   chat: ['Enter'],
   view: ['KeyV'],
@@ -156,11 +161,32 @@ export function withKey(b: Bindings, action: KeyAction, slot: number, code: stri
   return { ...b, [action]: list };
 }
 
-/** Empties a slot; null when that would leave the action without a key. */
-export function withoutKey(b: Bindings, action: KeyAction, slot: number): Bindings | null {
+/** Empties a slot (an action may be left without any key: the player chose so). */
+export function withoutKey(b: Bindings, action: KeyAction, slot: number): Bindings {
   if (slot >= b[action].length) return b;
-  if (b[action].length <= 1) return null;
   return { ...b, [action]: b[action].filter((_, k) => k !== slot) };
+}
+
+/**
+ * Puts `code` into the slot. When another action (or another slot of this one) has that key, the two
+ * swap: it gets the key this slot had, or simply loses the key when this slot was empty. Returns the
+ * action it was swapped with, for the notice. The caller checks for movement and reserved keys first.
+ */
+export function assignKey(b: Bindings, action: KeyAction, slot: number, code: string): { b: Bindings; swapped: KeyAction | null } {
+  const c = normalizeCode(code);
+  const before = b[action][slot];
+  let swapped: KeyAction | null = null;
+  const out = { ...b } as Bindings;
+  for (const { action: a } of KEY_ACTIONS) {
+    const at = out[a].indexOf(c);
+    if (at < 0 || (a === action && at === slot)) continue;
+    swapped = a === action ? null : a;
+    const list = [...out[a]];
+    if (before && before !== c) list[at] = before;
+    else list.splice(at, 1);
+    out[a] = list;
+  }
+  return { b: withKey(out, action, Math.min(slot, out[action].length), c), swapped };
 }
 
 const fresh = (): Bindings => {
@@ -169,15 +195,31 @@ const fresh = (): Bindings => {
   return out;
 };
 
+/** Saves from before v0.5.1 bound keys to skills: skill N becomes hotbar slot N, 疾走 slot 12. */
+const LEGACY: Readonly<Record<string, KeyAction>> = {
+  skill1: 'bar1',
+  skill2: 'bar2',
+  skill3: 'bar3',
+  skill4: 'bar4',
+  skill5: 'bar5',
+  skill6: 'bar6',
+  skill7: 'bar7',
+  skill8: 'bar8',
+  skill9: 'bar9',
+  skill10: 'bar10',
+  sprint: 'bar12',
+};
+
 /**
  * Saved settings, checked again: anything broken (or tampered with) falls back to the defaults. An
- * action the save does not know yet (skills 6–10 and 疾走 came in v0.5) gets its default key, unless the
- * player already put that key on something else; then it waits for one in the key settings.
+ * action the save does not know yet gets its default key, unless the player already put that key on
+ * something else; then it waits for one in the key settings. An action may have no key at all.
  */
 export function parseBindings(raw: string | null): Bindings {
   if (!raw) return fresh();
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
+    for (const [old, now] of Object.entries(LEGACY)) if (v[old] !== undefined && v[now] === undefined) v[now] = v[old];
     let out = {} as Bindings;
     for (const { action } of KEY_ACTIONS) out[action] = [];
     const missing: KeyAction[] = [];
@@ -187,7 +229,7 @@ export function parseBindings(raw: string | null): Bindings {
         missing.push(action);
         continue;
       }
-      if (!Array.isArray(list) || !list.length || list.length > slots) return fresh();
+      if (!Array.isArray(list) || list.length > slots) return fresh();
       for (const code of list) {
         if (typeof code !== 'string' || keyProblem(out, action, out[action].length, code)) return fresh();
         out = withKey(out, action, out[action].length, code);

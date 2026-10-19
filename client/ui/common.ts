@@ -1,4 +1,5 @@
 import { jobById, ROLE_COLORS, type JobId } from '../../shared/jobs';
+import { hotbarEditor } from './hotbar-editor';
 import type { Audio } from '../audio';
 import { h, store } from '../dom';
 /** Kept here rather than in game/view.ts so the settings dialog does not pull in the 3D code. */
@@ -25,8 +26,11 @@ export function pixelRatioFor(q: Quality): number {
   return q === 'high' ? Math.min(dpr, 2) : q === 'medium' ? 1 : 0.75;
 }
 
-/** Sound, picture quality and key settings; `onClose` runs when the dialog goes (e.g. to refresh key hints). */
-export function settingsModal(audio: Audio, onClose?: () => void): void {
+/**
+ * Sound, picture quality and key settings; `onClose` runs when the dialog goes (e.g. to refresh key
+ * hints). With `job` (in a room or a fight), the hotbar keys name that job's skills and 技能配置 opens.
+ */
+export function settingsModal(audio: Audio, onClose?: () => void, job?: JobId): void {
   const sfx = h('button', { class: 'btn' });
   const paintSfx = () => {
     sfx.textContent = `音效：${audio.sfxOn ? '開' : '關'}`;
@@ -69,6 +73,7 @@ export function settingsModal(audio: Audio, onClose?: () => void): void {
   };
   paintQuality();
 
+  let keys = keyEditor(job);
   const close = () => {
     back.remove();
     onClose?.();
@@ -85,7 +90,15 @@ export function settingsModal(audio: Audio, onClose?: () => void): void {
       h('div', { class: 'row' }, autoHeal),
       h('p', { class: 'muted small' }, '開：沒選隊友時，單體治療給射程內 HP 比例最低的人；關：給自己。'),
       h('h4', null, '按鍵'),
-      keyEditor(),
+      job
+        ? h(
+            'div',
+            { class: 'row' },
+            h('button', { class: 'btn small', onclick: () => hotbarEditor(job, () => keys.replaceWith((keys = keyEditor(job)))) }, `技能配置：${jobById(job).name}`),
+            h('span', { class: 'muted small' }, '拖曳安排哪個技能放在哪一格熱鍵'),
+          )
+        : h('p', { class: 'muted small' }, '技能放在哪一格熱鍵，進待機室或離線練習選好職業後，用「技能配置」安排。'),
+      keys,
       h('div', { class: 'row end' }, h('button', { class: 'btn primary', onclick: close }, '完成')),
     ),
   );

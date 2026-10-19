@@ -370,6 +370,26 @@ export const SPRINT_SLOT = 11;
 /** 疾走: every job has it, on its own key (Shift). */
 export const SPRINT: SkillInfo = ogcd('疾走', 60, '10 秒內移動速度 +30%', self([{ k: 'buff', s: 'sprint', dur: 10, who: 'me' }]));
 
+/**
+ * The one-character icon of each skill (there is no art: the hotbar and the skill layout editor draw it
+ * on the skill's colour, like the status icons). Unique within a job.
+ */
+const ICONS: Readonly<Record<string, string>> = {
+  三連斬: '斬', 挑釁: '挑', 堅盾: '盾', 不動要塞: '城', 守護結界: '界', 聖盾迴旋: '旋', 盾衝: '衝', 守護之誓: '誓', 誓約之刃: '刃', 破邪之光: '光',
+  劈砍連擊: '劈', 戰吼: '吼', 嗜血: '血', 死戰: '死', 裂地斬: '裂', 擲斧: '斧', 猛衝: '衝', 熱血庇護: '護', 戰嚎: '嚎', 狂血: '狂',
+  聖光彈: '聖', 治癒術: '癒', 光環禱言: '環', 神恩: '恩', 復甦之光: '甦', 迅唱: '迅', 烈日灼燒: '灼', 晨光恩典: '晨', 群體治癒: '群', 祈福: '福',
+  星屑彈: '屑', 星盾術: '星', 群星庇護: '庇', 星界領域: '域', 星還術: '還', 星蝕: '蝕', 星輝: '輝', 星辰守護: '辰', 星環結界: '結',
+  疾風連拳: '拳', 旋風踢: '踢', 崩山拳: '崩', 疾風之心: '心', 縮地: '縮', 裂空拳: '裂', 鐵身: '鐵', 卸力: '卸', 八方步: '步', 回氣: '氣',
+  穿雲連槍: '槍', 裂鱗刺: '刺', 天降擊: '降', 戰意昂揚: '昂', 後躍: '躍', 天槍墜擊: '墜', 龍鱗: '鱗',
+  速射: '射', 穿透箭: '穿', 箭雨: '雨', 守護之歌: '歌', 後空翻射擊: '翻', 戰歌: '戰', 毒牙箭: '毒', 連珠箭: '珠', 鷹眼凝神: '鷹',
+  火球術: '火', 爆炎術: '爆', 魔力湧泉: '泉', 隕星: '隕', 焰影步: '影', 歸泉: '歸', 灼燒咒: '燒', 焰幕: '幕', 蝕力咒: '蝕',
+  疾走: '走',
+};
+
+export function skillIcon(s: SkillInfo): string {
+  return ICONS[s.name] ?? s.name.slice(0, 1);
+}
+
 /** The skill in a slot: 0–9 the job's, SPRINT_SLOT 疾走, the Limit Break (or anything else) null. */
 export function skillAt(job: Job, slot: number): SkillInfo | null {
   if (slot === SPRINT_SLOT) return SPRINT;

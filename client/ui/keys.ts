@@ -1,6 +1,10 @@
+import { jobById, skillAt, type JobId } from '../../shared/jobs';
 import { clear, h, toast } from '../dom';
+import { loadLayout } from '../hotbar';
 import {
+  BAR_ACTIONS,
   KEY_ACTIONS,
+  assignKey,
   isModifier,
   keyLabel,
   keyProblem,
@@ -9,19 +13,27 @@ import {
   parseBindings,
   problemText,
   saveBindings,
-  withKey,
   withoutKey,
   type Bindings,
   type KeyAction,
 } from '../keys';
 
 /**
- * Key settings table (from 水球大亂鬥): click a slot, then press one key. A key another action already
- * has, a key held together with Ctrl / Shift / Alt, or a mouse button gets a warning and the slot keeps
- * waiting for another key; Esc cancels, Backspace empties the slot. Every change is saved at once.
+ * Key settings table (from 水球大亂鬥): click a slot, then press one key. A key that another action
+ * already has swaps over (a notice says which); a movement key, a key held together with Ctrl / Shift /
+ * Alt, or a mouse button gets a warning and the slot keeps waiting; Esc cancels, Backspace or × empties
+ * the slot. With `job`, the 12 hotbar keys show which of its skills each slot holds now. Saved at once.
  */
-export function keyEditor(): HTMLElement {
+export function keyEditor(job?: JobId): HTMLElement {
   let b: Bindings = loadBindings();
+  const layout = job ? loadLayout(job) : null;
+  const labelOf = (action: KeyAction, label: string) => {
+    const pos = BAR_ACTIONS.indexOf(action);
+    if (!job || !layout || pos < 0) return label;
+    const skill = layout[pos];
+    const s = skill === null || skill === undefined ? null : skillAt(jobById(job), skill);
+    return `${label}　${s ? s.name : '（空）'}`;
+  };
   let capture: { action: KeyAction; slot: number } | null = null;
   /** a lone Ctrl / Shift / Alt counts once it is released without another key in between */
   let held: string | null = null;
@@ -47,7 +59,7 @@ export function keyEditor(): HTMLElement {
       const cells = Array.from({ length: shown }, (_, slot) => {
         const waiting = capture?.action === action && capture.slot === slot;
         const code = list[slot];
-        return h(
+        const btn = h(
           'button',
           {
             class: `key-slot ${waiting ? 'capturing' : ''} ${code ? '' : 'empty'}`,
@@ -56,8 +68,11 @@ export function keyEditor(): HTMLElement {
           },
           waiting ? '請按鍵…' : code ? keyLabel(code) : '＋',
         );
+        if (!code || waiting) return btn;
+        const x = h('button', { class: 'key-clear', title: '清空這個鍵', onclick: () => clearKey(action, slot) }, '×');
+        return h('span', { class: 'key-pair' }, btn, x);
       });
-      return h('tr', null, h('td', null, label), h('td', null, ...cells));
+      return h('tr', null, h('td', null, labelOf(action, label)), h('td', null, ...cells));
     });
     table.append(
       h(
@@ -93,14 +108,32 @@ export function keyEditor(): HTMLElement {
     render();
   };
 
+  const nameOf = (action: KeyAction) => labelOf(action, KEY_ACTIONS.find((x) => x.action === action)?.label ?? action);
+
   const apply = (code: string) => {
     if (!capture) return;
     const problem = keyProblem(b, capture.action, capture.slot, code);
-    if (problem) return warn(problemText(problem)); // the slot keeps waiting: pick another key
-    b = withKey(b, capture.action, capture.slot, code);
+    // a key in use swaps over; movement and reserved keys still cannot be taken
+    if (problem && problem.kind !== 'taken') return warn(problemText(problem));
+    const before = b[capture.action][capture.slot];
+    const { b: next, swapped } = assignKey(b, capture.action, capture.slot, code);
+    b = next;
     saveBindings(b);
-    say(`已設定為 ${keyLabel(code)}`);
+    if (swapped) {
+      const text = before
+        ? `${keyLabel(code)} 原本在「${nameOf(swapped)}」，已互換：它改用 ${keyLabel(before)}`
+        : `${keyLabel(code)} 原本在「${nameOf(swapped)}」，已移過來（那一格現在少了這個鍵）`;
+      say(text, true);
+      toast(text);
+    } else say(`已設定為 ${keyLabel(code)}`);
     stop();
+  };
+
+  const clearKey = (action: KeyAction, slot: number) => {
+    b = withoutKey(b, action, slot);
+    saveBindings(b);
+    say(`已清空「${nameOf(action)}」的一個鍵`);
+    render();
   };
 
   const onDown = (e: KeyboardEvent) => {
@@ -113,9 +146,7 @@ export function keyEditor(): HTMLElement {
       return stop();
     }
     if (e.code === 'Backspace') {
-      const next = withoutKey(b, capture.action, capture.slot);
-      if (!next) return warn('每個動作至少要留 1 個鍵');
-      b = next;
+      b = withoutKey(b, capture.action, capture.slot);
       saveBindings(b);
       say('已清空這一格');
       return stop();

@@ -5,6 +5,7 @@ import { hpScale, partyNotes, practiceParty, roleCounts } from '../../shared/par
 import type { Audio } from '../audio';
 import { clear, h, store } from '../dom';
 import { jobBadge, settingsModal } from './common';
+import { hotbarEditor } from './hotbar-editor';
 
 const ROLES: readonly Role[] = ['tank', 'healer', 'dps'];
 const KEY = 'octaraid.practice';
@@ -191,7 +192,7 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
       h('span', { class: 'logo small' }, '八方討伐'),
       h('strong', { class: 'practice-title' }, '離線練習'),
       h('span', { class: 'grow' }),
-      h('button', { class: 'btn ghost', onclick: () => settingsModal(opts.audio) }, '設定'),
+      h('button', { class: 'btn ghost', onclick: () => settingsModal(opts.audio, undefined, c.job) }, '設定'),
       h('button', { class: 'btn ghost', onclick: opts.onBack }, '返回'),
     ),
     h(
@@ -204,7 +205,12 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
         h('p', { class: 'muted small' }, '在這台電腦上跑，不用開房；其他隊員由電腦擔任，會自己走位、出招、補血與復活。'),
         duties,
       ),
-      h('section', { class: 'panel' }, h('h3', null, '選擇職業'), ...groups),
+      h(
+        'section',
+        { class: 'panel' },
+        h('div', { class: 'row' }, h('h3', null, '選擇職業'), h('span', { class: 'grow' }), h('button', { class: 'btn small', onclick: () => hotbarEditor(c.job) }, '技能配置')),
+        ...groups,
+      ),
       h(
         'section',
         { class: 'panel' },

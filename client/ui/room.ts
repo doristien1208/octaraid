@@ -8,6 +8,7 @@ import type { Tally } from '../../shared/vote';
 import type { Audio } from '../audio';
 import { clear, copyText, h, isSubmitKey, toast } from '../dom';
 import { jobBadge, settingsModal } from './common';
+import { hotbarEditor } from './hotbar-editor';
 
 const ROLES: readonly Role[] = ['tank', 'healer', 'dps'];
 
@@ -85,7 +86,7 @@ export class RoomScreen {
         ),
         h('span', { class: 'grow' }),
         this.action,
-        h('button', { class: 'btn ghost', onclick: () => settingsModal(this.audio) }, '設定'),
+        h('button', { class: 'btn ghost', onclick: () => settingsModal(this.audio, undefined, this.me?.job) }, '設定'),
         h('button', { class: 'btn ghost', onclick: onLeave }, '離開房間'),
       ),
       h(
@@ -218,7 +219,13 @@ export class RoomScreen {
     const lb = LIMIT_BREAKS[job.role];
     clear(this.jobDetail);
     this.jobDetail.append(
-      h('h4', null, jobBadge(id, 'sm'), ` ${job.name}的技能`),
+      h(
+        'div',
+        { class: 'row' },
+        h('h4', null, jobBadge(id, 'sm'), ` ${job.name}的技能`),
+        h('span', { class: 'grow' }),
+        h('button', { class: 'btn small', title: '拖曳安排哪個技能放在哪一格熱鍵', onclick: () => hotbarEditor(id) }, '技能配置'),
+      ),
       h(
         'table',
         { class: 'skills' },

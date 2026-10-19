@@ -1,11 +1,13 @@
 import { FOES } from '../../shared/bosses/foes';
 import { RULES, TICK_RATE } from '../../shared/constants';
 import { clock, difficultyName, encounterById } from '../../shared/encounters';
-import { LB_SLOT, LIMIT_BREAKS, SPRINT_SLOT, jobById, skillAt, type Job, type SkillInfo } from '../../shared/jobs';
+import { LB_SLOT, LIMIT_BREAKS, jobById, skillAt, type Job, type SkillInfo } from '../../shared/jobs';
 import { END_NAMES, type FightEvent, type GameResult, type GameStartInfo, type SnapStatus, type Snapshot } from '../../shared/protocol';
 import { STATUS, STATUS_IDS } from '../../shared/status';
 import { h, isSubmitKey } from '../dom';
-import { SKILL_ACTIONS, keysText, type Bindings, type KeyAction } from '../keys';
+import { defaultLayout, type Layout } from '../hotbar';
+import { BAR_ACTIONS, keysText, type Bindings } from '../keys';
+import { skillGlyph } from '../ui/hotbar-editor';
 import { jobBadge } from '../ui/common';
 
 export interface HudActions {
@@ -15,6 +17,10 @@ export interface HudActions {
   settings(): void;
   /** a click on a party member */
   target(id: string): void;
+  /** a click on a hotbar slot: the skill slot it holds (or the Limit Break) */
+  use(slot: number): void;
+  /** the 配置 button: the skill layout editor */
+  editBar(): void;
 }
 
 /** What the view knows about each hotbar slot that the snapshot does not: is there a target in range? */
@@ -100,8 +106,11 @@ export class Hud {
   private resultNote: HTMLElement | null = null;
   private host = false;
   private readonly hotbar = h('div', { class: 'hud-hotbar' });
-  /** the hotbar's buttons with the slot each one shows (0–9, SPRINT_SLOT) */
-  private readonly slots: { el: HTMLElement; sweep: HTMLElement; num: HTMLElement; slot: number }[] = [];
+  /** the hotbar's 12 buttons in key order, with the skill slot each one holds (null: empty) */
+  private readonly slots: { el: HTMLElement; sweep: HTMLElement; num: HTMLElement; skill: number | null }[] = [];
+  /** which skill sits on which of the 12 slots: the player's layout for this job (client/hotbar.ts) */
+  private layout: Layout = defaultLayout();
+  private bindings: Bindings | null = null;
   private readonly lbBox: HTMLElement;
   private readonly lbBar = h('i');
   private readonly lbPct = h('span');
@@ -241,6 +250,7 @@ export class Hud {
       h('div', { class: 'hud-help' }, this.help, this.fps),
     );
     this.tip.hidden = true;
+    this.lbBox.addEventListener('click', () => this.act.use(LB_SLOT));
     if (lb) this.hoverTip(this.lbBox, () => [h('div', { class: 'tip-head' }, h('strong', null, lb.name), h('span', { class: 'tip-kind lb' }, '極限技')), h('div', { class: 'tip-meta' }, `全隊共用一條量表，滿了才能用${lb.cast ? ` · 詠唱 ${lb.cast} 秒` : ' · 瞬發'}`), h('p', null, lb.desc)]);
     this.setHost(false);
   }
@@ -274,31 +284,53 @@ export class Hud {
    * skills 1–5 below, 6–10 and 疾走 above.
    */
   setBindings(b: Bindings): void {
+    this.bindings = b;
+    this.renderBar();
+    this.lbKey.textContent = keysText(b, 'lb');
+    this.help.textContent = `W A S D 移動 · 拖曳轉鏡頭 · 滾輪縮放 · Tab 選敵人 · F1–F8 選隊友 · Esc 取消目標 · ${keysText(b, 'view')} 俯視 · ${keysText(b, 'chat')} 聊天 · `;
+  }
+
+  /** The player's layout for this job changed (技能配置). */
+  setLayout(layout: Layout): void {
+    this.layout = layout;
+    this.renderBar();
+  }
+
+  /**
+   * The hotbar: 12 slots in key order, two rows as FF14's bars (1–6 below, 7–12 above). Each shows its
+   * key, the icon and name of the skill the player put there; a click uses it.
+   */
+  private renderBar(): void {
     const job = this.job;
+    const b = this.bindings;
+    if (!b) return;
     this.slots.length = 0;
-    const slotEl = (slot: number, action: KeyAction): HTMLElement => {
-      const s = job ? skillAt(job, slot) : null;
+    const slotEl = (pos: number): HTMLElement => {
+      const skill = this.layout[pos] ?? null;
+      const s = job && skill !== null ? skillAt(job, skill) : null;
       const sweep = h('i', { class: 'sweep' });
       const num = h('em');
       const el = h(
         'div',
-        { class: `slot ${s?.kind ?? ''} ${slot === SPRINT_SLOT ? 'sprint' : ''}` },
+        { class: `slot ${s ? s.kind : 'empty'}` },
         sweep,
-        h('span', { class: 'key' }, keysText(b, action)),
+        h('span', { class: 'key' }, keysText(b, BAR_ACTIONS[pos]!)),
+        s && job && skill !== null ? skillGlyph(job, skill, 'sm') : null,
         h('span', { class: 'name' }, s?.name ?? ''),
-        h('span', { class: 'meta' }, s ? (s.kind === 'gcd' ? (s.cast ? `詠唱 ${s.cast}s` : 'GCD') : '能力技') : ''),
         num,
       );
-      if (s) this.hoverTip(el, () => skillTip(s));
-      this.slots.push({ el, sweep, num, slot });
+      if (s && skill !== null) {
+        this.hoverTip(el, () => skillTip(s));
+        el.addEventListener('click', () => this.act.use(skill));
+      }
+      this.slots.push({ el, sweep, num, skill: s ? skill : null });
       return el;
     };
+    const edit = h('button', { class: 'btn small bar-edit', title: '技能配置：拖曳安排熱鍵列', onclick: () => this.act.editBar() }, '配置');
     this.hotbar.replaceChildren(
-      h('div', { class: 'hb-row' }, ...[5, 6, 7, 8, 9].map((k) => slotEl(k, SKILL_ACTIONS[k]!)), slotEl(SPRINT_SLOT, 'sprint')),
-      h('div', { class: 'hb-row' }, ...[0, 1, 2, 3, 4].map((k) => slotEl(k, SKILL_ACTIONS[k]!))),
+      h('div', { class: 'hb-row' }, ...[6, 7, 8, 9, 10, 11].map(slotEl), edit),
+      h('div', { class: 'hb-row' }, ...[0, 1, 2, 3, 4, 5].map(slotEl)),
     );
-    this.lbKey.textContent = keysText(b, 'lb');
-    this.help.textContent = `W A S D 移動 · 拖曳轉鏡頭 · 滾輪縮放 · Tab 選敵人 · F1–F8 選隊友 · Esc 取消目標 · ${keysText(b, 'view')} 俯視 · ${keysText(b, 'chat')} 聊天 · `;
   }
 
   setHost(host: boolean): void {
@@ -308,9 +340,9 @@ export class Hud {
     if (this.resultNote) this.resultNote.textContent = host ? '你是房主：選擇直接重來或返回待機室（60 秒內沒選就回待機室）' : '等房主選擇：直接重來或返回待機室';
   }
 
-  /** Flashes a hotbar slot (or the LB box) when its key is pressed. */
+  /** Flashes the hotbar slot holding a skill (or the LB box) when it is used. */
   pressSlot(k: number): void {
-    const el = k === LB_SLOT ? this.lbBox : this.slots.find((x) => x.slot === k)?.el;
+    const el = k === LB_SLOT ? this.lbBox : this.slots.find((x) => x.skill === k)?.el;
     if (!el) return;
     el.classList.remove('press');
     void el.offsetWidth; // restart the animation
@@ -499,7 +531,8 @@ export class Hud {
   private paintSlots(g: [number, number], cd: number[], combo: number, off: boolean, states: SlotState[]): void {
     const job = this.job;
     if (!job) return;
-    this.slots.forEach(({ el, sweep, num, slot: k }) => {
+    this.slots.forEach(({ el, sweep, num, skill: k }) => {
+      if (k === null) return;
       const s = skillAt(job, k);
       if (!s) return;
       const own = cd[k] ?? 0;

@@ -1318,10 +1318,26 @@ p {
   background: var(--hud-bg);
   border: 2px solid rgba(255, 255, 255, 0.35);
   position: relative;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   font-size: 12px;
   overflow: hidden;
+  cursor: pointer;
+}
+
+.hud-hotbar .slot.empty {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(20, 16, 40, 0.25);
+  cursor: default;
+}
+
+.hud-hotbar .bar-edit {
+  align-self: center;
+  pointer-events: auto;
 }
 
 .slot .sweep {
@@ -1394,7 +1410,8 @@ p {
 
 .slot .name {
   font-weight: 800;
-  padding-top: 4px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .slot.press {
@@ -2264,4 +2281,196 @@ p {
 
 .hud-tip p {
   line-height: 1.45;
+}
+
+/* ------------------------------------------------------------ skill icons and 技能配置 */
+
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  color: #fff;
+  font-weight: 900;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.2);
+  flex: none;
+}
+
+.glyph.lg {
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+}
+
+.glyph.sm {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  border-radius: 7px;
+}
+
+.bar-editor {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.bar-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  background: #f4f1fb;
+  border-radius: 14px;
+}
+
+.bar-row {
+  display: flex;
+  gap: 8px;
+}
+
+.bar-cell {
+  width: 92px;
+  height: 84px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: #fff;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.bar-cell.empty {
+  border-style: dashed;
+  background: transparent;
+  cursor: pointer;
+}
+
+.bar-cell.picked,
+.bar-tile.picked {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary) inset;
+}
+
+.bar-key {
+  position: absolute;
+  top: 3px;
+  left: 7px;
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--primary-dark);
+}
+
+.bar-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bar-x {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bar-x:hover {
+  color: var(--bad);
+}
+
+.tname {
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.bar-note {
+  min-height: 1.2em;
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+
+.bar-palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.bar-tile {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 6px 8px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.bar-tile .glyph {
+  grid-row: span 2;
+}
+
+.bar-tile .tkind,
+.bar-tile .tat {
+  color: var(--muted);
+}
+
+.bar-tile .tat {
+  grid-column: 2;
+}
+
+.bar-tile .tkind {
+  display: none;
+}
+
+.bar-tile.placed {
+  background: #f7f5fc;
+}
+
+.bar-ghost {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid var(--primary);
+  border-radius: 12px;
+  padding: 4px 10px 4px 4px;
+  font-weight: 800;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.key-pair {
+  display: inline-flex;
+  align-items: center;
+}
+
+.key-clear {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.key-clear:hover {
+  color: var(--bad);
 }
