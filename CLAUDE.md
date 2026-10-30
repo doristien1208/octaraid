@@ -7,7 +7,7 @@ FF14-style 3D raid game for colleagues on the office LAN. 1–8 players (usually
 - Next: M5 balance from play-testing and v1.0. The training dummy (`shared/sim/practice.ts`) is only the sandbox's `&dummy` now.
 
 ## Constraints
-- Node.js 22.18.0 everywhere (`.nvmrc`): the test machine runs exactly this. Don't rely on newer Node APIs. `CLAUDE.local.md` says how to get this version on the dev machine.
+- Node.js 24 everywhere: the test machine moved from 22.18.0 to 24 on 2026-10-22; `.nvmrc` pins the exact version it runs. Don't rely on Node APIs newer than that. `CLAUDE.local.md` says how to get this version on the dev machine.
 - The GitHub repo is public: the test machine's IP, the share and anything personal stay in `CLAUDE.local.md` (gitignored).
 - Numbers are tuned for 3–4 players: boss HP = 4-player HP × Σ role weights ÷ 3.2 (tank 0.65, healer 0.55, DPS 1). Mechanic counts are designed for 4 players and scale with the party. No fight may run past 8 minutes (enrage at most 8:00).
 - Test machine: Windows. This game uses port 3100 and lives in the share's `octaraid` folder; the Game Hub (sibling project `../GameHub`) starts and watches it, so updates go through its `maintenance.txt` flow. IP, share and Hub details are in `CLAUDE.local.md` (gitignored). Adding the game to the Hub's live `hub.config.json` changes another project: ask first.

@@ -8,7 +8,7 @@ FF14 風格的 3D 網頁團隊討伐戰，給同事在公司區網一起玩：�
 
 ## 環境
 
-Node.js 22.18.0（與測試機相同）。用 nvm 的話，在專案資料夾執行 `nvm use` 會讀 `.nvmrc`。
+Node.js 24（與測試機相同，`.nvmrc` 記著確切版本）。用 nvm 的話，在專案資料夾執行 `nvm use` 會讀 `.nvmrc`。
 
 ```bash
 npm install

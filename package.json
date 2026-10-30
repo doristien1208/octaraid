@@ -5,7 +5,7 @@
   "description": "八方討伐：FF14 風格的 3D 網頁團隊討伐戰，1–8 人連線",
   "type": "module",
   "engines": {
-    "node": ">=22.18.0 <23"
+    "node": ">=24 <25"
   },
   "scripts": {
     "dev": "concurrently -k -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
@@ -23,7 +23,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@types/node": "^22.20.4",
+    "@types/node": "^24.19.2",
     "@types/three": "0.186.0",
     "@types/ws": "^8.18.2",
     "concurrently": "^10.0.5",
