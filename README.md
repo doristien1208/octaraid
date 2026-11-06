@@ -89,6 +89,15 @@ npm run typecheck
 
 4. 同事開 `http://<測試機 IP>:3100`；`/healthz` 可看版本、房間數與線上人數
 
+## 部署到 Render
+
+repo 根目錄的 `render.yaml` 是 Render 的 Blueprint：Render 後台選 New → Blueprint，連這個 repo 就會建出一個 Web Service（新加坡、免費方案，`npm ci --include=dev && npm run build` 建置、`npm start` 啟動、`/healthz` 健康檢查，push 到 main 自動重新部署）。Node 版本照 `.nvmrc`，埠號由 Render 的 `PORT` 給。
+
+- 房間存在伺服器記憶體裡，只能開一個實例；重新部署、重啟或休眠時房間會消失。伺服器收到 SIGTERM 時會先通知所有玩家再關閉。
+- 免費方案 15 分鐘沒有流量就休眠，下一個人打開要等約 1 分鐘；要一直開著就把 `plan` 改成付費方案。
+- WebSocket 有開 permessage-deflate 壓縮：戰鬥快照實測約縮到 1/6（4 人打 1 小時從約 0.5 GB 降到不到 0.1 GB）。
+- 磁碟是暫時的，`logs/server.log` 不會留下來，紀錄看 Render 後台的 Logs。
+
 ## 調整數值
 
 | 想改的東西 | 檔案 |

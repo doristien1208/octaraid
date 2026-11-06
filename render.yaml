@@ -1,0 +1,15 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec): New → Blueprint → pick this repo.
+# One web service in Singapore (closest to Taiwan). Rooms live in the server's memory, so it is one
+# instance only. The free plan sleeps after 15 minutes without traffic and takes about a minute to wake;
+# a paid plan (e.g. 0.5c-512mb) stays up. Node comes from .nvmrc; Render sets PORT and the server reads it.
+services:
+  - type: web
+    name: octaraid
+    runtime: node
+    region: singapore
+    plan: free
+    # the build needs vite and esbuild, which are devDependencies
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit

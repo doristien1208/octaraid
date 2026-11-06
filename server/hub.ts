@@ -198,6 +198,11 @@ export class Hub {
     room.add(s);
   }
 
+  /** A line for everyone connected (shown as a toast and in the chat). */
+  notifyAll(text: string): void {
+    for (const s of this.sessions.values()) if (s.online) s.send({ t: 'notice', text });
+  }
+
   private onlineCount(): number {
     let n = 0;
     for (const s of this.sessions.values()) if (s.online) n++;

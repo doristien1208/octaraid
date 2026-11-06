@@ -16,7 +16,15 @@ process.on('unhandledRejection', (err) => log(`[錯誤] 未處理的 Promise 錯
 
 // After `npm run build` this file lives in dist/server/ and the client in dist/public/.
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
-const { server } = createApp(publicDir);
+const { server, hub } = createApp(publicDir);
+
+// A host stops the server with SIGTERM before a deploy or a restart (Render gives 30 seconds): tell the
+// players first, so the dropped connection is not a mystery. Rooms live in memory and do not survive.
+process.on('SIGTERM', () => {
+  log('收到 SIGTERM：通知玩家後關閉伺服器');
+  hub.notifyAll('伺服器要更新或重新啟動，連線即將中斷，房間不會保留：請稍候 1 分鐘再重新整理頁面');
+  setTimeout(() => process.exit(0), 2000);
+});
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   log(

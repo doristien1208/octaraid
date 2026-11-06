@@ -64,6 +64,17 @@ async function connect(name: string, token?: string) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe('server', () => {
+  it('compresses the socket (permessage-deflate) and passes a notice to everyone online', async () => {
+    const { c: a } = await connect('Ann');
+    const { c: b } = await connect('Ben');
+    expect(a.ws.extensions).toContain('permessage-deflate');
+    app.hub.notifyAll('伺服器要重新啟動');
+    expect(await a.wait('notice')).toMatchObject({ text: '伺服器要重新啟動' });
+    expect(await b.wait('notice')).toMatchObject({ text: '伺服器要重新啟動' });
+    a.close();
+    b.close();
+  });
+
   it('rejects sockets from another origin', async () => {
     const c = new Client('http://evil.example');
     await expect(c.open()).rejects.toThrow();

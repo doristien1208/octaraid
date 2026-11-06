@@ -262,4 +262,6 @@ export type S2C =
   | { t: 'deny'; s: number; why: DenyReason }
   | { t: 'end'; result: GameResult }
   | { t: 'pong'; c: number }
-  | { t: 'error'; code: string; msg: string };
+  | { t: 'error'; code: string; msg: string }
+  /** something everyone should know, e.g. the server is about to restart */
+  | { t: 'notice'; text: string };

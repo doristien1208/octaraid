@@ -166,6 +166,11 @@ net.onMessage = (m: S2C) => {
       audio.play('error');
       toast(m.msg, 'error');
       break;
+    case 'notice':
+      toast(m.text);
+      room?.addChat('', m.text);
+      game?.addChat('', m.text);
+      break;
     case 'pong':
       break;
   }

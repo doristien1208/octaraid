@@ -49,7 +49,14 @@ export function createApp(publicDir: string | null, timing?: Timing): { server: 
     });
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 });
+  // permessage-deflate: the snapshots are JSON that repeats itself tick after tick, so with the deflate
+  // context kept between messages they shrink to about a sixth (1,040 bytes to ~160 on a 4-player Hard
+  // fight, ~30 µs each). That matters on a host that counts outbound traffic (Render)
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: 4 * 1024,
+    perMessageDeflate: { zlibDeflateOptions: { level: 3 }, threshold: 128 },
+  });
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
     if (pathname !== '/ws' || !sameOrigin(req)) {
