@@ -65,6 +65,8 @@ export function parseC2S(raw: string): C2S | null {
       const dz = m.dz === undefined ? 0 : num(m.dz, 10);
       return dx === null || dz === null ? null : { t: 'use', s: slot, tg, dx, dz };
     }
+    case 'jump':
+      return { t: 'jump' };
     case 'endtest':
       return { t: 'endtest' };
     case 'again':

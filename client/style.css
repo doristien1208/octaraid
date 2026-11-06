@@ -530,10 +530,25 @@ p {
   color: var(--primary-dark);
   width: 22px;
   text-align: center;
+  white-space: nowrap;
+}
+
+.skills td.ico {
+  width: 26px;
+  padding-right: 0;
+}
+
+.skills td.ico .glyph {
+  display: grid;
 }
 
 .skills tr.lb td {
   background: #f4f1fb;
+}
+
+/* a skill the player left off the hotbar */
+.skills tr.off td {
+  color: var(--muted);
 }
 
 .votes {
@@ -949,39 +964,36 @@ p {
 
 .st {
   display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 800;
-  background: rgba(61, 123, 224, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  justify-items: center;
+  align-content: start;
+  gap: 1px;
   line-height: 1;
 }
 
-.st.bad {
-  background: rgba(216, 67, 67, 0.9);
-}
-
-.st.big {
-  width: 30px;
-  height: 36px;
-  grid-template-rows: 22px 12px;
-  font-size: 13px;
-}
-
+/* the seconds left, under the icon */
 .st small {
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: 0 1px 2px #000, 0 0 2px #000;
+}
+
+/* what I put on the enemy (my DoTs): a gold frame, first in the row */
+.st.mine .glyph {
+  outline: 2px solid #ffd34d;
+  outline-offset: 1px;
+}
+
+.st.mine small {
+  color: #ffe58a;
 }
 
 .hud-status {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  min-height: 36px;
+  min-height: 40px;
 }
 
 .bar i.shield {
@@ -1434,7 +1446,7 @@ p {
   border-radius: 12px;
   padding: 8px 10px;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
   gap: 4px 8px;
   align-items: center;
   border: 2px solid transparent;
@@ -1671,6 +1683,12 @@ p {
     width: 64px;
     height: 50px;
     font-size: 11px;
+  }
+
+  .hud-hotbar .slot .glyph {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
   }
 
   .slot .meta {
@@ -1992,8 +2010,8 @@ p {
   vertical-align: middle;
 }
 
-.boss-st .st {
-  transform: scale(0.85);
+.boss-st .st small {
+  font-size: 9px;
 }
 
 .hud-freeze {
@@ -2256,6 +2274,7 @@ p {
 
 .tip-head strong {
   font-size: 15px;
+  flex: 1;
 }
 
 .tip-kind {
@@ -2296,17 +2315,73 @@ p {
   flex: none;
 }
 
+/* a game-icons.net picture, white on its colour (client/skill-icons.ts); no `position` here, so the
+   hotbar's cooldown sweep still draws over it */
+.glyph.icon {
+  background:
+    radial-gradient(120% 90% at 28% 12%, rgba(255, 255, 255, 0.4), transparent 55%),
+    linear-gradient(160deg, var(--a), var(--b));
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    inset 0 -4px 8px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.glyph.icon svg {
+  width: 80%;
+  height: 80%;
+  fill: color-mix(in oklab, #fff 90%, var(--a));
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 2px rgba(0, 0, 0, 0.35));
+}
+
 .glyph.lg {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   font-size: 22px;
 }
 
+.glyph.md {
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+  border-radius: 8px;
+}
+
 .glyph.sm {
-  width: 28px;
-  height: 28px;
-  font-size: 16px;
-  border-radius: 7px;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+/* status icons: on a target or boss bar, and in the party list */
+.glyph.tg {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.glyph.xs {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  border-radius: 4px;
+}
+
+.glyph.xs.icon {
+  border-width: 0;
+}
+
+/* a status without a skill picture (a boss's mark or a penalty): its glyph on blue or red */
+.glyph.good {
+  background: #3d7be0;
+}
+
+.glyph.bad {
+  background: #d84343;
 }
 
 .bar-editor {

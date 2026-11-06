@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RULES, TICK_RATE, sec } from '../shared/constants';
 import { encounterById } from '../shared/encounters';
-import { LB_SLOT, SPRINT_SLOT, type JobId } from '../shared/jobs';
+import { LB_SLOT, SPRINT_SLOT, jobById, type JobId } from '../shared/jobs';
 import type { FightEvent } from '../shared/protocol';
 import { reach, sideOf } from '../shared/sim/arena';
 import { Fight, type FightOptions } from '../shared/sim/fight';
@@ -489,5 +489,60 @@ describe('the training dummy', () => {
     expect(raid).toHaveLength(2); // the priest and the brawler; the tank was invulnerable
     expect(f.fightTicks).toBe(sec(54));
     expect(TICK_RATE).toBe(30);
+  });
+});
+
+describe('moving skills and jumping', () => {
+  const slotOf = (job: JobId, name: string) => jobById(job).skills.findIndex((s) => s.name === name);
+
+  it('後躍 leaps towards the character\'s back, wherever the boss is', () => {
+    const f = fight(['lancer'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 6);
+    f.move('p0', 0, 6, Math.PI / 2, (clock += 1000)); // turned to face east
+    expect(f.use('p0', slotOf('lancer', '後躍'))).toBe('ok');
+    run(f, sec(0.45) + 2);
+    expect(p.x).toBeCloseTo(-12, 1);
+    expect(p.z).toBeCloseTo(6, 1);
+  });
+
+  it('後空翻射擊 turns to the target as it shoots, so it flips away from the target', () => {
+    const f = fight(['ranger'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 6);
+    f.move('p0', 0, 6, Math.PI / 2, (clock += 1000));
+    expect(f.use('p0', slotOf('ranger', '後空翻射擊'))).toBe('ok');
+    run(f, sec(0.4) + 2);
+    expect(p.x).toBeCloseTo(0, 1);
+    expect(p.z).toBeCloseTo(16, 1);
+  });
+
+  it('a jump cuts a cast as moving does, shows in the snapshot and cannot start again in the air', () => {
+    const f = fight(['sorcerer'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 10);
+    expect(f.use('p0', slotOf('sorcerer', '火球術'))).toBe('ok');
+    run(f, 3);
+    expect(p.cast).not.toBeNull();
+    f.jump('p0');
+    const ev = run(f, 1);
+    expect(ev.some((e) => e.k === 'intr' && e.i === 'p0')).toBe(true);
+    expect(f.snapshot().p[0]!.j).toBeGreaterThan(0);
+    const at = p.jumpAt;
+    f.jump('p0'); // still in the air
+    expect(p.jumpAt).toBe(at);
+    run(f, RULES.jump);
+    expect(f.snapshot().p[0]!.j).toBeUndefined();
+  });
+
+  it('marks who put a status on an enemy, so each player can find their own DoT', () => {
+    const f = fight(['sorcerer', 'ranger'], { calm: true });
+    place(f, 'p0', 0, 10);
+    place(f, 'p1', 6, 10);
+    expect(f.use('p1', slotOf('ranger', '毒牙箭'))).toBe('ok');
+    run(f, 3);
+    const st = f.snapshot().e[0]!.st!;
+    expect(st.find((x) => x[3] === 1)).toBeTruthy(); // p1 is second in the list
+    expect(f.snapshot().p[1]!.st?.every((x) => x[3] === undefined) ?? true).toBe(true);
   });
 });

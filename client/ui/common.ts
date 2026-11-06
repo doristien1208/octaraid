@@ -99,6 +99,16 @@ export function settingsModal(audio: Audio, onClose?: () => void, job?: JobId): 
           )
         : h('p', { class: 'muted small' }, '技能放在哪一格熱鍵，進待機室或離線練習選好職業後，用「技能配置」安排。'),
       keys,
+      // CC BY 3.0 asks for the authors, the license and whether the pictures were changed (CREDITS.md)
+      h(
+        'p',
+        { class: 'muted small' },
+        '技能圖示：',
+        h('a', { href: 'https://game-icons.net', target: '_blank', rel: 'noopener' }, 'game-icons.net'),
+        '（Lorc、Delapouite、Skoll、DarkZaitzev、Zeromancer），',
+        h('a', { href: 'https://creativecommons.org/licenses/by/3.0/deed.zh_TW', target: '_blank', rel: 'noopener' }, 'CC BY 3.0'),
+        '，已改色並加上底色',
+      ),
       h('div', { class: 'row end' }, h('button', { class: 'btn primary', onclick: close }, '完成')),
     ),
   );

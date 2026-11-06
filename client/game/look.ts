@@ -242,4 +242,10 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
 export const LB_CLIP: Readonly<Record<Role, string>> = { tank: 'Melee_Block', healer: 'Ranged_Magic_Summon', dps: 'Melee_2H_Attack_Spin' };
 
 /** Clips that only make sense standing (they move the legs); the rest can play on the upper body while running. */
-export const FULL_BODY = new Set(['Dodge_Forward', 'Dodge_Backward', 'Melee_1H_Attack_Jump_Chop', 'Melee_2H_Attack_Spin', 'Melee_Unarmed_Attack_Kick', 'Cheering', 'Ranged_Magic_Summon']);
+export const FULL_BODY = new Set(['Dodge_Forward', 'Dodge_Backward', 'Melee_1H_Attack_Jump_Chop', 'Melee_2H_Attack_Spin', 'Melee_Unarmed_Attack_Kick', 'Cheering', 'Ranged_Magic_Summon', 'Jump_Full_Short']);
+
+/**
+ * A jump (Space): Jump_Full_Short from just before take-off to just after landing, a little slowed. The
+ * view lifts the body along an arc from `rise` to `land` seconds after the key (client/game/view.ts).
+ */
+export const JUMP = { clip: 'Jump_Full_Short', from: 0.24, to: 0.8, speed: 0.8, rise: 0.05, land: 0.55, height: 1 } as const;

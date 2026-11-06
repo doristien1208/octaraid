@@ -67,6 +67,8 @@ export interface Fighter {
   connected: boolean;
   /** tick of the last accepted step that actually moved */
   movedAt: number;
+  /** tick the last jump (Space) began */
+  jumpAt: number;
   /** server time (ms) of the last position report, -1 before the first */
   reportedAt: number;
   gcdAt: number;
@@ -230,6 +232,7 @@ export class Fight {
         statuses: [],
         connected: true,
         movedAt: -999,
+        jumpAt: -999,
         reportedAt: -1,
         gcdAt: -999,
         gcdLen: RULES.gcd,
@@ -296,6 +299,19 @@ export class Fight {
     const c = p.cast;
     if (c && Math.hypot(p.x - c.x, p.z - c.z) > RULES.castMove && c.end - this.tick > RULES.slidecast) this.interrupt(p);
     return corrected ? [p.x, p.z] : null;
+  }
+
+  /**
+   * A jump (Space). It only shows: it dodges nothing. As in FF14 it counts as moving: it cuts a cast short
+   * (unless the cast is almost done) and fails a freeze check.
+   */
+  jump(id: string): void {
+    const p = this.players.get(id);
+    if (!p || this.phase === 'over' || p.dead || p.dash || this.stunned(p)) return;
+    if (this.tick - p.jumpAt < RULES.jump) return;
+    p.jumpAt = this.tick;
+    const c = p.cast;
+    if (c && c.end - this.tick > RULES.slidecast) this.interrupt(p);
   }
 
   /**
@@ -648,11 +664,9 @@ export class Fight {
             const len = Math.hypot(dx, dz);
             [ux, uz] = len > 0.01 ? [dx / len, dz / len] : [Math.sin(p.f), Math.cos(p.f)];
           } else {
-            const from = foe ?? this.nearestFoe(p);
-            if (from) {
-              const d = Math.hypot(p.x - from.x, p.z - from.z) || 1;
-              [ux, uz] = [(p.x - from.x) / d, (p.z - from.z) / d];
-            } else [ux, uz] = [-Math.sin(p.f), -Math.cos(p.f)];
+            // towards the character's back, wherever it faces: a skill used on a target has just turned it
+            // to face that target (後空翻射擊), 後躍 keeps the way it was facing
+            [ux, uz] = [-Math.sin(p.f), -Math.cos(p.f)];
           }
           const [x1, z1] = clampToArena(this.enc.arena, p.x + ux * fx.dist, p.z + uz * fx.dist);
           this.startDash(p, x1, z1, fx.dur);
@@ -1288,8 +1302,17 @@ export class Fight {
 
   snapshot(): Snapshot {
     const t = this.tick;
-    const st = (list: StatusInst[]): SnapStatus[] | undefined =>
-      list.length ? list.map((s) => [STATUS_INDEX.get(s.id)!, s.until < 0 ? -1 : s.until - t, Math.round(s.v)]) : undefined;
+    // on an enemy, what a player put there says who (their place in `p`), so each one can find their own DoTs
+    const order = new Map([...this.players.keys()].map((id, k) => [id, k]));
+    const st = (list: StatusInst[], bySource = false): SnapStatus[] | undefined =>
+      list.length
+        ? list.map((s): SnapStatus => {
+            const row: SnapStatus = [STATUS_INDEX.get(s.id)!, s.until < 0 ? -1 : s.until - t, Math.round(s.v)];
+            const from = bySource ? order.get(s.src) : undefined;
+            if (from !== undefined) row.push(from);
+            return row;
+          })
+        : undefined;
     const ev = this.events;
     this.events = [];
     return {
@@ -1312,6 +1335,7 @@ export class Fight {
         c: p.cast ? [p.cast.slot, p.cast.end - t, p.cast.end - p.cast.start] : undefined,
         st: st(p.statuses),
         fm: p.dash ? 1 : undefined,
+        j: t - p.jumpAt < RULES.jump ? t - p.jumpAt : undefined,
         g: [Math.max(0, p.gcdAt + p.gcdLen - t), p.gcdLen],
         cd: p.ready.map((r) => Math.max(0, r - t)),
         cb: t > p.comboUntil ? 0 : p.combo,
@@ -1326,7 +1350,7 @@ export class Fight {
         mh: f.maxHp,
         t: f.target,
         c: f.cast ? [f.cast.name, f.cast.end - t, f.cast.end - f.cast.start] : undefined,
-        st: st(f.statuses),
+        st: st(f.statuses, true),
         ag: [...f.enmity.entries()]
           .filter(([id]) => this.players.get(id)?.dead === false)
           .sort((a, b) => b[1] - a[1])

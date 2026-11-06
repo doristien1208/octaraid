@@ -9,6 +9,7 @@ import { defaultLayout, type Layout } from '../hotbar';
 import { BAR_ACTIONS, keysText, type Bindings } from '../keys';
 import { skillGlyph } from '../ui/hotbar-editor';
 import { jobBadge } from '../ui/common';
+import { iconTile, statusTile } from '../ui/icon';
 
 export interface HudActions {
   chat(text: string): void;
@@ -35,24 +36,34 @@ function paint(el: HTMLElement, key: string, build: () => HTMLElement[]): void {
   el.replaceChildren(...build());
 }
 
-/** What the icons show: a status changes, or its seconds tick down to the tenth (the big ones). */
-const stKey = (list: SnapStatus[] | undefined, big: boolean) =>
-  (list ?? []).map(([k, left, v]) => `${k}:${big && left >= 0 ? Math.ceil(left / 3) : left >= 0 ? 1 : 0}:${big ? v : 0}`).join(',');
+/**
+ * Where a status list is drawn: my own bar (26 px icons with seconds), a target or boss (22 px with seconds,
+ * so a DoT shows how long it has left) or a party row (16 px, no seconds).
+ */
+type StMode = 'me' | 'target' | 'row';
+const timed = (mode: StMode) => mode !== 'row';
 const secs = (ticks: number) => (ticks >= TICK_RATE * 10 ? String(Math.ceil(ticks / TICK_RATE)) : (ticks / TICK_RATE).toFixed(1));
 
-/** Status icons, buffs first; zone statuses and 超越之力 have no timer. */
-function statusIcons(list: SnapStatus[] | undefined, max: number, big = false): HTMLElement[] {
+/** What the icons show: a status changes, or the seconds it shows tick down. */
+const stKey = (list: SnapStatus[] | undefined, mode: StMode) =>
+  (list ?? []).map(([k, left, v, src]) => `${k}:${left < 0 ? '-' : timed(mode) ? secs(left) : '+'}:${mode === 'me' ? v : 0}:${src ?? ''}`).join(',');
+
+/**
+ * Status icons: on an enemy the ones I put there first (with a gold frame), then buffs before debuffs.
+ * Zone statuses and 超越之力 have no timer. `mine` is my place in the snapshot's player list.
+ */
+function statusIcons(list: SnapStatus[] | undefined, max: number, mode: StMode, mine = -1): HTMLElement[] {
   if (!list) return [];
   return list
-    .map(([k, left, v]) => ({ info: STATUS[STATUS_IDS[k]!], left, v }))
-    .sort((a, b) => Number(b.info.good) - Number(a.info.good))
+    .map(([k, left, v, src]) => ({ id: STATUS_IDS[k]!, info: STATUS[STATUS_IDS[k]!], left, v, own: src !== undefined && src === mine }))
+    .sort((a, b) => Number(b.own) - Number(a.own) || Number(b.info.good) - Number(a.info.good))
     .slice(0, max)
-    .map(({ info, left, v }) =>
+    .map(({ id, info, left, v, own }) =>
       h(
         'span',
-        { class: `st ${info.good ? 'good' : 'bad'} ${big ? 'big' : ''}`, title: `${info.name}：${info.desc}` },
-        h('b', null, info.icon),
-        big && left >= 0 ? h('small', null, secs(left)) : info.shield && big ? h('small', null, String(v)) : null,
+        { class: `st ${mode} ${own ? 'mine' : ''}`, title: `${info.name}：${info.desc}${own ? '（你施加的）' : ''}` },
+        statusTile(id, mode === 'me' ? 'sm' : mode === 'target' ? 'tg' : 'xs'),
+        timed(mode) && left >= 0 ? h('small', null, secs(left)) : mode === 'me' && info.shield ? h('small', null, String(v)) : null,
         // stacks (易傷, the twins' 共鳴)
         (info.taken === 0.5 || info.name === '共鳴') && v > 1 ? h('em', null, `×${v}`) : null,
       ),
@@ -75,7 +86,7 @@ export type LogKind = 'taken' | 'dealt' | 'heal' | 'cast' | 'death' | 'fail' | '
 function skillTip(s: SkillInfo): HTMLElement[] {
   const meta = [s.spell ? '魔法' : '', s.cast ? `詠唱 ${s.cast} 秒` : '瞬發', s.cd ? `冷卻 ${s.cd} 秒` : '', s.range ? `射程 ${s.range} m` : ''].filter(Boolean);
   return [
-    h('div', { class: 'tip-head' }, h('strong', null, s.name), h('span', { class: `tip-kind ${s.kind}` }, s.kind === 'gcd' ? 'GCD' : '能力技')),
+    h('div', { class: 'tip-head' }, iconTile(s.name, 'md'), h('strong', null, s.name), h('span', { class: `tip-kind ${s.kind}` }, s.kind === 'gcd' ? 'GCD' : '能力技')),
     h('div', { class: 'tip-meta' }, meta.join(' · ')),
     h('p', null, s.desc),
   ];
@@ -195,6 +206,7 @@ export class Hud {
     this.lbBox = h(
       'div',
       { class: 'hud-lb', title: lb ? `${lb.name}：${lb.desc}` : '' },
+      lb ? iconTile(lb.name, 'sm') : null,
       h('strong', null, 'LB'),
       h('div', { class: 'bar lb' }, this.lbBar, this.lbPct),
       lb ? h('span', { class: 'lb-name' }, lb.name) : null,
@@ -251,7 +263,7 @@ export class Hud {
     );
     this.tip.hidden = true;
     this.lbBox.addEventListener('click', () => this.act.use(LB_SLOT));
-    if (lb) this.hoverTip(this.lbBox, () => [h('div', { class: 'tip-head' }, h('strong', null, lb.name), h('span', { class: 'tip-kind lb' }, '極限技')), h('div', { class: 'tip-meta' }, `全隊共用一條量表，滿了才能用${lb.cast ? ` · 詠唱 ${lb.cast} 秒` : ' · 瞬發'}`), h('p', null, lb.desc)]);
+    if (lb) this.hoverTip(this.lbBox, () => [h('div', { class: 'tip-head' }, iconTile(lb.name, 'md'), h('strong', null, lb.name), h('span', { class: 'tip-kind lb' }, '極限技')), h('div', { class: 'tip-meta' }, `全隊共用一條量表，滿了才能用${lb.cast ? ` · 詠唱 ${lb.cast} 秒` : ' · 瞬發'}`), h('p', null, lb.desc)]);
     this.setHost(false);
   }
 
@@ -287,7 +299,7 @@ export class Hud {
     this.bindings = b;
     this.renderBar();
     this.lbKey.textContent = keysText(b, 'lb');
-    this.help.textContent = `W A S D 移動 · 拖曳轉鏡頭 · 滾輪縮放 · Tab 選敵人 · F1–F8 選隊友 · Esc 取消目標 · ${keysText(b, 'view')} 俯視 · ${keysText(b, 'chat')} 聊天 · `;
+    this.help.textContent = `W A S D 移動 · 拖曳轉鏡頭 · 滾輪縮放 · Tab 選敵人 · F1–F8 選隊友 · Esc 取消目標 · ${keysText(b, 'jump') ? `${keysText(b, 'jump')} 跳躍 · ` : ''}${keysText(b, 'view')} 俯視 · ${keysText(b, 'chat')} 聊天 · `;
   }
 
   /** The player's layout for this job changed (技能配置). */
@@ -315,7 +327,7 @@ export class Hud {
         { class: `slot ${s ? s.kind : 'empty'}` },
         sweep,
         h('span', { class: 'key' }, keysText(b, BAR_ACTIONS[pos]!)),
-        s && job && skill !== null ? skillGlyph(job, skill, 'sm') : null,
+        s && job && skill !== null ? skillGlyph(job, skill, 'md') : null,
         h('span', { class: 'name' }, s?.name ?? ''),
         num,
       );
@@ -455,6 +467,7 @@ export class Hud {
     }
 
     // the bosses: one bar each (the twins side by side), with what they cast and their own statuses
+    const mine = s.p.findIndex((p) => p.i === this.meId);
     const bosses = s.e.filter((e) => FOES[e.kd].boss && !(e.g && e.hp > 0));
     const boss = bosses[0] ?? s.e[0];
     for (const e of bosses) {
@@ -474,7 +487,7 @@ export class Hud {
       bar.el.classList.toggle('dim', e.u === 1);
       this.castBar(bar.cast, e.c ? { name: e.c[0], left: e.c[1], total: e.c[2] } : null);
       bar.cast.dataset.m = e.c ? (this.castKinds.get(e.i) ?? 'mech') : '';
-      paint(bar.st, stKey(e.st, false), () => statusIcons(e.st, 4));
+      paint(bar.st, stKey(e.st, 'target'), () => statusIcons(e.st, 6, 'target', mine));
     }
     for (const [id, bar] of this.bossBars) {
       if (bosses.some((e) => e.i === id)) continue;
@@ -494,7 +507,7 @@ export class Hud {
       row.hp.style.width = pct(p.hp / p.mh);
       row.shield.style.width = pct(Math.min(1, p.sh / p.mh));
       row.text.textContent = p.d ? '倒地' : p.hp.toLocaleString();
-      paint(row.st, stKey(p.st, false), () => statusIcons(p.st, 5));
+      paint(row.st, stKey(p.st, 'row'), () => statusIcons(p.st, 5, 'row'));
       const r = ranks.indexOf(p.i);
       row.rank.textContent = r === 0 ? '仇恨 1' : '';
     }
@@ -505,7 +518,7 @@ export class Hud {
       this.myHp.style.width = pct(me.hp / me.mh);
       this.myShield.style.width = pct(Math.min(1, me.sh / me.mh));
       this.myHpText.textContent = me.d ? '倒地：等待補師復活' : `HP ${me.hp.toLocaleString()} / ${me.mh.toLocaleString()}${me.sh ? `（護盾 ${me.sh.toLocaleString()}）` : ''}`;
-      paint(this.myStatus, stKey(me.st, true), () => statusIcons(me.st, 10, true));
+      paint(this.myStatus, stKey(me.st, 'me'), () => statusIcons(me.st, 10, 'me'));
       const cast = me.c;
       const castName = cast ? (cast[0] === LB_SLOT && this.job ? LIMIT_BREAKS[this.job.role].name : this.job ? (skillAt(this.job, cast[0])?.name ?? '') : '') : '';
       this.castBar(this.myCast, cast ? { name: castName, left: cast[1], total: cast[2] } : null);
@@ -572,7 +585,8 @@ export class Hud {
     this.target.classList.add('show');
     this.target.classList.toggle('ally', !foe);
     const st = foe ? foe.st : p!.st;
-    paint(this.target, `${id}|${Math.round(frac * 1000)}|${cast?.[0] ?? ''}|${stKey(st, false)}|${p?.d ?? ''}`, () => {
+    const mine = s.p.findIndex((x) => x.i === this.meId);
+    paint(this.target, `${id}|${Math.round(frac * 1000)}|${cast?.[0] ?? ''}|${stKey(st, 'target')}|${p?.d ?? ''}`, () => {
       const parts = [
         h('div', { class: 'tg-name' }, foe ? '目標' : '隊友', h('strong', null, name)),
         h(
@@ -583,7 +597,7 @@ export class Hud {
         ),
       ];
       if (cast) parts.push(h('div', { class: 'tg-cast' }, `讀條：${cast[0]}`));
-      parts.push(h('div', { class: 'tg-st' }, ...statusIcons(st, 6)));
+      parts.push(h('div', { class: 'tg-st' }, ...statusIcons(st, 6, 'target', mine)));
       return parts;
     });
   }

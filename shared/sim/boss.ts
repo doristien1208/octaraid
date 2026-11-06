@@ -786,7 +786,9 @@ export class BossBrain {
           () => {
             const recent = f.tick - sec(0.3);
             for (const q of f.living()) {
-              if (q.movedAt < recent || q.dash) continue;
+              // in the air from a jump, or just landed, counts as moving
+              const jumped = f.tick - q.jumpAt < RULES.jump + sec(0.3);
+              if ((q.movedAt < recent && !jumped) || q.dash) continue;
               f.addStatus(q, { id: 'frozen', src: boss.id, until: f.tick + sec(m.time), v: 0 }, false);
               this.miss(q, g);
             }

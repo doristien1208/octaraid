@@ -256,9 +256,9 @@ export class Effects {
     });
   }
 
-  /** A rock falling from the sky onto (x, z), then the blast (隕星). */
-  meteor(x: number, z: number, r: number): void {
-    const rock = new THREE.Mesh(this.unitSphere, this.mat('#ff7a2c', 1, false));
+  /** A blazing rock falling from the sky onto (x, z), then the blast in `color` (隕星: blue, as players' areas are). */
+  meteor(x: number, z: number, r: number, color: string): void {
+    const rock = new THREE.Mesh(this.unitSphere, this.mat('#bfe0ff', 1, false));
     const m = rock.material as THREE.MeshBasicMaterial;
     const fall = 0.45;
     this.add({
@@ -270,8 +270,8 @@ export class Effects {
         rock.scale.setScalar(1.2);
         rock.position.set(x - 6 * (1 - k), 18 * (1 - k) + 0.5, z - 6 * (1 - k));
         if (k >= 1) {
-          this.ring(x, z, r, '#ff7a2c', 0.8);
-          this.burst(x, 1, z, r * 0.6, '#ffb03b', 0.5);
+          this.ring(x, z, r, color, 0.8);
+          this.burst(x, 1, z, r * 0.6, '#9fd0ff', 0.5);
         }
       },
     });

@@ -3,7 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { ROLE_COLORS, type Job, type Role } from '../../shared/jobs';
 import { recolorTexture, type Models, type Recolor } from './assets';
-import { FULL_BODY, LB_CLIP, LOOKS, type Extra, type Look } from './look';
+import { FULL_BODY, JUMP, LB_CLIP, LOOKS, type Extra, type Look } from './look';
 import { CodeBody, ball, box, cone, cyl, gem, mesh, myRingMaterial, ring, shadowMaterial, toon, toonGradient } from './models';
 
 /** KayKit characters are about 2.4 units tall: this makes them about 1.75 m. */
@@ -82,8 +82,11 @@ class Animator {
     }
   }
 
-  /** Plays a clip once (or looped until stopLoop); it replaces whatever skill clip was playing. */
-  play(name: string, loop = false, speed = 1): void {
+  /**
+   * Plays a clip once (or looped until stopLoop); it replaces whatever skill clip was playing. A one-off
+   * clip can start part-way in (`from`) and stop early (`to`), both in seconds of the clip.
+   */
+  play(name: string, loop = false, speed = 1, from = 0, to = Infinity): void {
     const u = this.models.upper.get(name);
     const l = this.models.lower.get(name);
     if (!u || !l || this.dead) return;
@@ -99,9 +102,10 @@ class Animator {
       a.clampWhenFinished = true;
       a.timeScale = speed;
       a.setEffectiveWeight(this.o);
+      a.time = from;
       a.play();
     }
-    this.over = { u: ua, l: la, full: FULL_BODY.has(name), t: 0, ends: loop ? Infinity : u.duration / speed };
+    this.over = { u: ua, l: la, full: FULL_BODY.has(name), t: 0, ends: loop ? Infinity : (Math.min(to, u.duration) - from) / speed };
   }
 
   /** Ends a looped clip (a cast) with a short fade. */
@@ -372,6 +376,11 @@ export class Avatar {
     if (!s) return;
     this.casting = false;
     this.anim?.play(typeof s === 'string' ? s : s[step % 3]!);
+  }
+
+  /** a jump (Space): the legs and arms; the view lifts the body */
+  playJump(): void {
+    this.anim?.play(JUMP.clip, false, JUMP.speed, JUMP.from, JUMP.to);
   }
 
   /** the victory pose, looped until the results screen goes */

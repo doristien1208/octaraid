@@ -45,8 +45,11 @@ export interface GameStartInfo {
   foes: { id: string; kind: FoeKind; name: string; r: number }[];
 }
 
-/** Statuses in a snapshot: [index into STATUS_IDS, ticks left (−1 while it comes from a zone), value]. */
-export type SnapStatus = [number, number, number];
+/**
+ * Statuses in a snapshot: [index into STATUS_IDS, ticks left (−1 while it comes from a zone), value] and, on
+ * an enemy, the place in `p` of the player who put it there.
+ */
+export type SnapStatus = [number, number, number, number?];
 
 /** Player state in a snapshot. Short keys keep the 30 Hz stream small. */
 export interface SnapPlayer {
@@ -65,6 +68,8 @@ export interface SnapPlayer {
   st?: SnapStatus[];
   /** in a dash or jump: the server moves this character, the client follows */
   fm?: 1;
+  /** jumping (Space): ticks since the jump began */
+  j?: number;
   /** GCD [ticks left, total ticks] */
   g: [number, number];
   /** cooldown ticks left per skill */
@@ -241,6 +246,8 @@ export type C2S =
   | { t: 'mv'; x: number; z: number; f: number }
   /** a skill (0–9), the Limit Break (10) or 疾走 (11); tg: the chosen target; dx, dz: the direction I am moving */
   | { t: 'use'; s: number; tg?: string | null; dx?: number; dz?: number }
+  /** a jump (Space): only a motion, but it cuts a cast like moving does */
+  | { t: 'jump' }
   | { t: 'endtest' }
   /** the host, on the results: the same duty again with the same party, or back to the waiting room */
   | { t: 'again' }

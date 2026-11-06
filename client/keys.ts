@@ -19,6 +19,7 @@ export type KeyAction =
   | 'bar11'
   | 'bar12'
   | 'lb'
+  | 'jump'
   | 'chat'
   | 'view'
   | 'mute';
@@ -38,6 +39,7 @@ export const KEY_ACTIONS: readonly { action: KeyAction; label: string; slots: nu
   { action: 'bar11', label: '熱鍵 11', slots: 2 },
   { action: 'bar12', label: '熱鍵 12', slots: 2 },
   { action: 'lb', label: '極限技（LB）', slots: 1 },
+  { action: 'jump', label: '跳躍', slots: 1 },
   { action: 'chat', label: '聊天', slots: 1 },
   { action: 'view', label: '切換俯視鏡頭', slots: 1 },
   { action: 'mute', label: '靜音', slots: 1 },
@@ -60,6 +62,7 @@ export const DEFAULT_BINDINGS: Readonly<Bindings> = {
   bar11: ['Minus'],
   bar12: ['ShiftLeft'],
   lb: ['KeyR'],
+  jump: ['Space'],
   chat: ['Enter'],
   view: ['KeyV'],
   mute: ['KeyM'],

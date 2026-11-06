@@ -1,18 +1,12 @@
-import { ROLE_COLORS, SPRINT_SLOT, jobById, skillAt, skillIcon, type Job, type JobId, type SkillInfo } from '../../shared/jobs';
+import { jobById, skillAt, type Job, type JobId } from '../../shared/jobs';
 import { h } from '../dom';
 import { BAR_SKILLS, clearAt, defaultLayout, loadLayout, place, saveLayout, swap, type Layout } from '../hotbar';
 import { BAR_ACTIONS, keysText, loadBindings } from '../keys';
+import { iconTile } from './icon';
 
-/** The colour behind a skill's icon: its role's for GCD skills, purple for abilities, teal for 疾走. */
-export function tileColor(job: Job, s: SkillInfo, slot: number): string {
-  if (slot === SPRINT_SLOT) return '#2a9fb0';
-  return s.kind === 'gcd' ? ROLE_COLORS[job.role] : '#7a55c8';
-}
-
-/** A skill's icon: its character on its colour. */
-export function skillGlyph(job: Job, slot: number, size: 'sm' | 'lg' = 'lg'): HTMLElement {
-  const s = skillAt(job, slot)!;
-  return h('b', { class: `glyph ${size}`, style: { background: tileColor(job, s, slot) } }, skillIcon(s));
+/** The icon of the skill in a skill slot of the job (0–9, SPRINT_SLOT). */
+export function skillGlyph(job: Job, slot: number, size: 'sm' | 'md' | 'lg' = 'lg'): HTMLElement {
+  return iconTile(skillAt(job, slot)!.name, size);
 }
 
 /**

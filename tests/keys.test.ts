@@ -21,7 +21,15 @@ describe('key settings', () => {
     expect(actionOf(b, 'KeyR')).toBe('lb');
     expect(actionOf(b, 'Enter')).toBe('chat');
     expect(actionOf(b, 'KeyV')).toBe('view');
+    expect(actionOf(b, 'Space')).toBe('jump');
     expect(actionOf(b, 'KeyW')).toBeNull(); // movement is fixed, not an action
+  });
+
+  it('gives a save from before v0.5.3 the jump on Space, unless the player put Space on something else', () => {
+    const before = { ...parseBindings(null) } as Record<string, string[]>;
+    delete before.jump;
+    expect(parseBindings(JSON.stringify(before)).jump).toEqual(['Space']);
+    expect(parseBindings(JSON.stringify({ ...before, bar11: ['Space'] })).jump).toEqual([]);
   });
 
   it('round-trips saved settings, keeps an emptied slot, and rejects broken or tampered ones', () => {

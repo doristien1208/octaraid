@@ -202,6 +202,16 @@ describe('rolling, sweeping and freezing', () => {
     expect(hurt(ev, 'p3')).toBe(6000);
     expect(hurt(ev, 'p1')).toBe(0);
   });
+
+  it('counts a jump as moving: in the air (or just landed) when the check ends, you freeze', () => {
+    const f = fight(one({ k: 'freeze', time: 4 }));
+    spreadOut(f);
+    run(f, sec(5) - sec(0.5));
+    f.jump('p2'); // still in the air when it ends
+    run(f, sec(0.5) + 3);
+    expect(f.players.get('p2')!.statuses.some((s) => s.id === 'frozen')).toBe(true);
+    expect(f.players.get('p1')!.statuses.some((s) => s.id === 'frozen')).toBe(false);
+  });
 });
 
 describe('aimed attacks', () => {

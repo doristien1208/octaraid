@@ -20,6 +20,7 @@ import { makeFoe, type FoeView } from './bosses';
 import { CameraRig } from './camera';
 import { Effects } from './effects';
 import { Hud, type ResultAction, type SlotState } from './hud';
+import { JUMP } from './look';
 import { Playback } from './playback';
 import { Telegraphs } from './telegraphs';
 
@@ -30,9 +31,22 @@ export interface GameLink {
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** How high a jump (Space) is `t` seconds after it began: a parabola between take-off and landing. */
+function jumpLift(t: number): number {
+  const k = (t - JUMP.rise) / (JUMP.land - JUMP.rise);
+  return k > 0 && k < 1 ? 4 * k * (1 - k) * JUMP.height : 0;
+}
 const hittable = (e: SnapFoe) => e.hp > 0 && !e.u && !e.g;
 
-/** Effect colours per job: projectiles, slashes, rings. */
+/**
+ * Players' area attacks (the circles, fans and strips that flash on the ground) are all blue, so they never
+ * look like a boss telegraph (orange, yellow, purple, red): the sorcerer's orange 爆炎術 and 隕星 read as
+ * boss attacks (play-test, v0.5.3).
+ */
+const PLAYER_AOE = '#4b8dff';
+
+/** Effect colours per job: projectiles, slashes and party buffs. */
 const JOB_FX: Readonly<Record<string, { color: string; shot?: 'orb' | 'arrow' }>> = {
   guardian: { color: '#9cc3ff' },
   berserker: { color: '#ff6a5a' },
@@ -79,8 +93,12 @@ export class GameView {
   private bindings: Bindings = loadBindings();
   private me: { x: number; z: number; f: number; moving: boolean } | null = null;
   private sent = { x: NaN, z: NaN, f: NaN, at: 0 };
-  /** the server is moving me (a dash or a jump) */
+  /** the server is moving me (a dash or a leap) */
   private carried = false;
+  /** when my last jump (Space) began, performance.now() ms; others' jumps come in the snapshots */
+  private myJumpAt = -Infinity;
+  /** the tick each other player's last jump began, so its clip starts once */
+  private readonly jumpSeen = new Map<string, number>();
   private dead = false;
   private target: string | null = null;
   private last: Snapshot | null = null;
@@ -550,17 +568,17 @@ export class GameView {
           }
           break;
         case 'circle':
-          if (fx.at === 'me') this.effects.ring(from.x, from.z, fx.r, color);
+          if (fx.at === 'me') this.effects.ring(from.x, from.z, fx.r, PLAYER_AOE);
           else if (to) {
-            if (fx.p >= 1000) this.effects.meteor(to.x, to.z, fx.r);
-            else this.effects.ring(to.x, to.z, fx.r, color);
+            if (fx.p >= 1000) this.effects.meteor(to.x, to.z, fx.r, PLAYER_AOE);
+            else this.effects.ring(to.x, to.z, fx.r, PLAYER_AOE);
           }
           break;
         case 'cone':
-          this.effects.fan(from.x, from.z, facing, fx.r, fx.deg, color);
+          this.effects.fan(from.x, from.z, facing, fx.r, fx.deg, PLAYER_AOE);
           break;
         case 'line':
-          this.effects.line(from.x, from.z, facing, fx.len, fx.w, color);
+          this.effects.line(from.x, from.z, facing, fx.len, fx.w, PLAYER_AOE);
           break;
         case 'buff':
           if (fx.who === 'party') this.effects.wave(from.x, from.z, fx.r ?? 20, color, 0.7);
@@ -608,7 +626,7 @@ export class GameView {
         const skill = e.dot ? '持續傷害' : `「${this.skillName(this.meId, e.sk)}」`;
         this.hud.logCombat('dealt', `你的${skill} → ${this.who(e.t)} ${e.a.toLocaleString()}${how ? `（${how}）` : ''}`);
       }
-      if (e.sk === LB_SLOT) this.effects.ring(at.x, at.z, RULES.lbDpsRadius, '#ff4d6d', 1);
+      if (e.sk === LB_SLOT) this.effects.ring(at.x, at.z, RULES.lbDpsRadius, PLAYER_AOE, 1);
       return;
     }
     if (e.t === this.meId || this.isFoe(e.s)) {
@@ -776,10 +794,24 @@ export class GameView {
       case 'lb':
         this.useSkill(LB_SLOT);
         return;
+      case 'jump':
+        this.jump();
+        return;
       default:
         if (skill !== null) this.useSkill(skill, e.repeat);
     }
   };
+
+  /** Space: my character hops at once; the server tells everyone else (and cuts my cast, as moving does). */
+  private jump(): void {
+    const now = performance.now();
+    if (this.over || this.dead || this.carried || this.stunned() || now - this.myJumpAt < RULES.jump * TICK_MS) return;
+    // a focused button would take the Space as a click
+    if (document.activeElement instanceof HTMLButtonElement) document.activeElement.blur();
+    this.myJumpAt = now;
+    this.avatars.get(this.meId)?.playJump();
+    this.link.send({ t: 'jump' });
+  }
 
   /** Sends a skill to the server with the target it should go to; the server has the last word. */
   private useSkill(slot: number, repeat = false): void {
@@ -874,7 +906,7 @@ export class GameView {
       }
       if (id === this.meId && this.me) {
         av.root.visible = true;
-        av.update(this.me.x, this.me.z, this.me.f, this.me.moving || this.carried, dt, time, this.lift(latest));
+        av.update(this.me.x, this.me.z, this.me.f, this.me.moving || this.carried, dt, time, Math.max(this.lift(latest), jumpLift((now - this.myJumpAt) / 1000)));
         continue;
       }
       if (!p0 || !p1) {
@@ -882,6 +914,12 @@ export class GameView {
         continue;
       }
       av.root.visible = true;
+      const s1 = pb ? b : a;
+      if (s1 && p1.j !== undefined && this.jumpSeen.get(id) !== s1.k - p1.j) {
+        this.jumpSeen.set(id, s1.k - p1.j);
+        av.playJump();
+      }
+      const l0 = this.lift(p0);
       av.update(
         p0.x + (p1.x - p0.x) * k,
         p0.z + (p1.z - p0.z) * k,
@@ -889,7 +927,7 @@ export class GameView {
         p0.m === 1 || p1.m === 1,
         dt,
         time,
-        this.lift(p1),
+        l0 + (this.lift(p1) - l0) * k,
       );
       av.setOffline(p1.dc === 1);
     }
@@ -917,13 +955,14 @@ export class GameView {
     }
   };
 
-  /** Height of a jump (天降擊): an arc while the 滯空 status runs. */
+  /** Height off the ground: the arc of a leap (天降擊, while 滯空 runs) or of a jump (Space). */
   private lift(p: SnapPlayer | undefined): number {
+    const hop = p?.j !== undefined ? jumpLift(p.j / TICK_RATE) : 0;
     const st = p?.st?.find((x) => STATUS_IDS[x[0]] === 'airborne');
-    if (!st) return 0;
+    if (!st) return hop;
     const total = Math.round(0.8 * TICK_RATE);
     const k = 1 - Math.max(0, st[1]) / total;
-    return Math.sin(Math.PI * Math.min(1, Math.max(0, k))) * 3;
+    return Math.max(hop, Math.sin(Math.PI * Math.min(1, Math.max(0, k))) * 3);
   }
 
   /** The camera-relative direction the movement keys point to (zero when none are held). */

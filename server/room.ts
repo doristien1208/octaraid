@@ -123,6 +123,9 @@ export class Room {
           if (r !== 'ok' && r !== 'queued') s.send({ t: 'deny', s: msg.s, why: r });
         }
         return;
+      case 'jump':
+        if (this.phase === 'playing' && this.fight) this.fight.jump(s.id);
+        return;
       case 'chat':
         return this.chat(m, msg.text);
       case 'job':

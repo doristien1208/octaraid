@@ -288,7 +288,7 @@ export const JOBS: readonly Job[] = [
       gcd('裂鱗刺', 0, 15, '威力 250，加出血 15 秒、每秒威力 25', { target: 'enemy', range: MELEE, fx: [hit(250), { k: 'dot', s: 'bleed', p: 25, dur: 15 }] }),
       ogcd('天降擊', 30, '躍起 0.8 秒後落在目標身上，威力 700；滯空時不受地面攻擊', { target: 'enemy', range: 20, fx: [{ k: 'leap', dur: 0.8 }, hit(700)] }),
       ogcd('戰意昂揚', 120, '全隊傷害 +10%，15 秒', { target: 'self', range: 0, fx: [{ k: 'buff', s: 'battleCry', dur: 15, who: 'party' }] }),
-      ogcd('後躍', 20, '向後躍 12 m', { target: 'self', range: 0, fx: [{ k: 'dash', dist: 12, dir: 'back', dur: 0.45 }] }),
+      ogcd('後躍', 20, '往角色背後躍 12 m（看角色面向，不看目標）', { target: 'self', range: 0, fx: [{ k: 'dash', dist: 12, dir: 'back', dur: 0.45 }] }),
       ogcd('天槍墜擊', 60, '跳到 20 m 內的目標身上，周圍 5 m 威力 500；滯空時不受地面攻擊', {
         target: 'enemy',
         range: 20,
@@ -315,7 +315,7 @@ export const JOBS: readonly Job[] = [
       gcd('穿透箭', 0, 10, '25 m 直線（寬 2 m），每個目標威力 450', { target: 'enemy', range: RANGED, fx: [{ k: 'line', len: 25, w: 2, p: 450 }] }),
       ogcd('箭雨', 30, '目標處 6 m 圓形，威力 500', { target: 'enemy', range: RANGED, fx: [{ k: 'circle', at: 'target', r: 6, p: 500 }] }),
       ogcd('守護之歌', 90, '全隊受傷 −10%，15 秒', { target: 'self', range: 0, fx: [{ k: 'buff', s: 'song', dur: 15, who: 'party' }] }),
-      ogcd('後空翻射擊', 20, '向後翻 10 m，同時威力 150', { target: 'enemy', range: RANGED, fx: [hit(150), { k: 'dash', dist: 10, dir: 'back', dur: 0.4 }] }),
+      ogcd('後空翻射擊', 20, '威力 150，同時往背後翻 10 m（射擊時轉向目標，所以是離開目標）', { target: 'enemy', range: RANGED, fx: [hit(150), { k: 'dash', dist: 10, dir: 'back', dur: 0.4 }] }),
       ogcd('戰歌', 120, '全隊傷害 +5%，15 秒', self([{ k: 'buff', s: 'warSong', dur: 15, who: 'party' }])),
       gcd('毒牙箭', 0, 0, '25 m，威力 100，加 30 秒持續傷害、每秒威力 5', { target: 'enemy', range: RANGED, fx: [hit(100), { k: 'dot', s: 'venom', p: 5, dur: 30 }] }),
       ogcd('連珠箭', 15, '25 m，威力 100', { target: 'enemy', range: RANGED, fx: [hit(100)] }),
@@ -369,26 +369,6 @@ export const SPRINT_SLOT = 11;
 
 /** 疾走: every job has it, on its own key (Shift). */
 export const SPRINT: SkillInfo = ogcd('疾走', 60, '10 秒內移動速度 +30%', self([{ k: 'buff', s: 'sprint', dur: 10, who: 'me' }]));
-
-/**
- * The one-character icon of each skill (there is no art: the hotbar and the skill layout editor draw it
- * on the skill's colour, like the status icons). Unique within a job.
- */
-const ICONS: Readonly<Record<string, string>> = {
-  三連斬: '斬', 挑釁: '挑', 堅盾: '盾', 不動要塞: '城', 守護結界: '界', 聖盾迴旋: '旋', 盾衝: '衝', 守護之誓: '誓', 誓約之刃: '刃', 破邪之光: '光',
-  劈砍連擊: '劈', 戰吼: '吼', 嗜血: '血', 死戰: '死', 裂地斬: '裂', 擲斧: '斧', 猛衝: '衝', 熱血庇護: '護', 戰嚎: '嚎', 狂血: '狂',
-  聖光彈: '聖', 治癒術: '癒', 光環禱言: '環', 神恩: '恩', 復甦之光: '甦', 迅唱: '迅', 烈日灼燒: '灼', 晨光恩典: '晨', 群體治癒: '群', 祈福: '福',
-  星屑彈: '屑', 星盾術: '星', 群星庇護: '庇', 星界領域: '域', 星還術: '還', 星蝕: '蝕', 星輝: '輝', 星辰守護: '辰', 星環結界: '結',
-  疾風連拳: '拳', 旋風踢: '踢', 崩山拳: '崩', 疾風之心: '心', 縮地: '縮', 裂空拳: '裂', 鐵身: '鐵', 卸力: '卸', 八方步: '步', 回氣: '氣',
-  穿雲連槍: '槍', 裂鱗刺: '刺', 天降擊: '降', 戰意昂揚: '昂', 後躍: '躍', 天槍墜擊: '墜', 龍鱗: '鱗',
-  速射: '射', 穿透箭: '穿', 箭雨: '雨', 守護之歌: '歌', 後空翻射擊: '翻', 戰歌: '戰', 毒牙箭: '毒', 連珠箭: '珠', 鷹眼凝神: '鷹',
-  火球術: '火', 爆炎術: '爆', 魔力湧泉: '泉', 隕星: '隕', 焰影步: '影', 歸泉: '歸', 灼燒咒: '燒', 焰幕: '幕', 蝕力咒: '蝕',
-  疾走: '走',
-};
-
-export function skillIcon(s: SkillInfo): string {
-  return ICONS[s.name] ?? s.name.slice(0, 1);
-}
 
 /** The skill in a slot: 0–9 the job's, SPRINT_SLOT 疾走, the Limit Break (or anything else) null. */
 export function skillAt(job: Job, slot: number): SkillInfo | null {

@@ -1,14 +1,17 @@
 import { hasBoss } from '../../shared/bosses';
 import { MAX_PLAYERS, RULES } from '../../shared/constants';
 import { ENCOUNTERS, KIND_NAMES, VOTE_OPTIONS, clock, difficultyName, optionLabel } from '../../shared/encounters';
-import { JOBS, LIMIT_BREAKS, ROLE_COLORS, ROLE_NAMES, SPRINT, jobById, type JobId, type Role } from '../../shared/jobs';
+import { JOBS, LIMIT_BREAKS, ROLE_COLORS, ROLE_NAMES, SPRINT_SLOT, jobById, skillAt, type JobId, type Role } from '../../shared/jobs';
 import { ROLE_CAPS, hpScale, partyNotes, roleCounts, roleHasRoom } from '../../shared/party';
 import type { C2S, RoomMember, RoomView } from '../../shared/protocol';
 import type { Tally } from '../../shared/vote';
 import type { Audio } from '../audio';
 import { clear, copyText, h, isSubmitKey, toast } from '../dom';
+import { loadLayout } from '../hotbar';
+import { BAR_ACTIONS, keysText, loadBindings } from '../keys';
 import { jobBadge, settingsModal } from './common';
 import { hotbarEditor } from './hotbar-editor';
+import { iconTile } from './icon';
 
 const ROLES: readonly Role[] = ['tank', 'healer', 'dps'];
 
@@ -217,6 +220,16 @@ export class RoomScreen {
   private renderJobDetail(id: JobId): void {
     const job = jobById(id);
     const lb = LIMIT_BREAKS[job.role];
+    // the keys as this player set them (技能配置 and the key settings), not the defaults
+    const layout = loadLayout(id);
+    const keys = loadBindings();
+    const keyOf = (slot: number) => {
+      const pos = layout.indexOf(slot);
+      return pos < 0 ? '—' : keysText(keys, BAR_ACTIONS[pos]!) || '—';
+    };
+    // listed in hotbar order (熱鍵 1, 2, …), then what the player left off the bar
+    const at = (slot: number) => (layout.includes(slot) ? layout.indexOf(slot) : layout.length);
+    const slots = [...job.skills.map((_, k) => k), SPRINT_SLOT].sort((a, b) => at(a) - at(b));
     clear(this.jobDetail);
     this.jobDetail.append(
       h(
@@ -224,7 +237,7 @@ export class RoomScreen {
         { class: 'row' },
         h('h4', null, jobBadge(id, 'sm'), ` ${job.name}的技能`),
         h('span', { class: 'grow' }),
-        h('button', { class: 'btn small', title: '拖曳安排哪個技能放在哪一格熱鍵', onclick: () => hotbarEditor(id) }, '技能配置'),
+        h('button', { class: 'btn small', title: '拖曳安排哪個技能放在哪一格熱鍵', onclick: () => hotbarEditor(id, () => this.renderJobDetail(id)) }, '技能配置'),
       ),
       h(
         'table',
@@ -232,19 +245,22 @@ export class RoomScreen {
         h(
           'tbody',
           null,
-          ...[...job.skills, SPRINT].map((s, k) =>
-            h(
+          ...slots.map((slot) => {
+            const s = skillAt(job, slot)!;
+            return h(
               'tr',
-              null,
-              h('td', { class: 'key' }, k < 9 ? String(k + 1) : k === 9 ? '0' : '⇧'),
+              { class: layout.includes(slot) ? '' : 'off' },
+              h('td', { class: 'key' }, keyOf(slot)),
+              h('td', { class: 'ico' }, iconTile(s.name, 'sm')),
               h('td', null, h('strong', null, s.name), h('span', { class: 'muted small' }, ` ${s.kind === 'gcd' ? 'GCD' : '能力技'} · ${s.cast ? `詠唱 ${s.cast} 秒` : '瞬發'} · ${s.cd ? `CD ${s.cd} 秒` : '無 CD'}`)),
               h('td', { class: 'small' }, s.desc),
-            ),
-          ),
+            );
+          }),
           h(
             'tr',
             { class: 'lb' },
-            h('td', { class: 'key' }, 'R'),
+            h('td', { class: 'key' }, keysText(keys, 'lb') || '—'),
+            h('td', { class: 'ico' }, iconTile(lb.name, 'sm')),
             h('td', null, h('strong', null, lb.name), h('span', { class: 'muted small' }, ' 全隊共用的極限技')),
             h('td', { class: 'small' }, lb.desc),
           ),

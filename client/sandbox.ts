@@ -85,7 +85,8 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
       } else if (m.t === 'use') {
         const r = fight.use('me', m.s, { target: m.tg, dx: m.dx, dz: m.dz });
         if (r !== 'ok' && r !== 'queued') view?.onDeny(m.s, r);
-      } else if (m.t === 'chat') view?.addChat(roster[0]!.name, m.text);
+      } else if (m.t === 'jump') fight.jump('me');
+      else if (m.t === 'chat') view?.addChat(roster[0]!.name, m.text);
       else if (m.t === 'endtest') fight.end('test');
     },
     leave() {
