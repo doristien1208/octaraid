@@ -546,3 +546,69 @@ describe('moving skills and jumping', () => {
     expect(f.snapshot().p[1]!.st?.every((x) => x[3] === undefined) ?? true).toBe(true);
   });
 });
+
+describe('喚靈術士 (v0.6)', () => {
+  const slotOf = (name: string) => jobById('summoner').skills.findIndex((s) => s.name === name);
+
+  it('岩靈召喚 makes the next 4 spells instant and shields 10% of max HP', () => {
+    const f = fight(['summoner'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 10);
+    expect(f.use('p0', slotOf('岩靈召喚'))).toBe('ok');
+    expect(p.statuses.find((s) => s.id === 'stoneGuard')!.v).toBe(Math.round(10_000 * 0.1 * (1 + RULES.det)));
+    run(f, RULES.lock);
+    for (let k = 0; k < 4; k++) {
+      expect(f.use('p0', slotOf('靈光彈'))).toBe('ok');
+      expect(p.cast).toBeNull(); // instant
+      run(f, RULES.gcd);
+    }
+    expect(f.use('p0', slotOf('靈光彈'))).toBe('ok');
+    expect(p.cast).not.toBeNull(); // the fifth is cast again
+  });
+
+  it('炎靈召喚 turns the next two 靈光彈 into 600-potency strikes', () => {
+    const f = fight(['summoner'], { calm: true });
+    place(f, 'p0', 0, 10);
+    expect(f.use('p0', slotOf('炎靈召喚'))).toBe('ok');
+    run(f, RULES.lock);
+    const strikes: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      f.use('p0', slotOf('靈光彈'));
+      const ev = run(f, RULES.gcd);
+      strikes.push(damage(ev, 'p0'));
+    }
+    // 600 × 9.5 × determination at the very least, more than a 265 could ever do even as a crit and a direct hit
+    const least = 600 * RULES.potency * (1 + RULES.det) * (1 - RULES.variance);
+    expect(strikes[0]!).toBeGreaterThanOrEqual(Math.floor(least));
+    expect(strikes[1]!).toBeGreaterThanOrEqual(Math.floor(least));
+    expect(strikes[2]!).toBeLessThan(Math.floor(least));
+  });
+
+  it('星龍降臨 breathes 5 times, 3 s apart, then blows up on the target', () => {
+    const f = fight(['summoner'], { calm: true });
+    const p = f.players.get('p0')!;
+    place(f, 'p0', 0, 10);
+    expect(f.use('p0', slotOf('星龍降臨'))).toBe('ok');
+    expect(p.statuses.some((s) => s.id === 'starDragon')).toBe(true);
+    const ev = run(f, sec(15) + 5);
+    const pets = ev.filter((e): e is Extract<FightEvent, { k: 'pet' }> => e.k === 'pet');
+    expect(pets.length).toBe(5);
+    expect(pets.filter((e) => e.f).length).toBe(1);
+    expect(pets[4]!.f).toBe(1);
+    run(f, sec(1));
+    expect(p.statuses.some((s) => s.id === 'starDragon')).toBe(false);
+  });
+
+  it('喚魂術 raises a fallen ally', () => {
+    const f = fight(['summoner', 'guardian'], { calm: true });
+    place(f, 'p0', 0, 10);
+    place(f, 'p1', 4, 10);
+    const ally = f.players.get('p1')!;
+    ally.hp = 1;
+    f.hurt(ally, 99_999, null);
+    expect(ally.dead).toBe(true);
+    expect(f.use('p0', slotOf('喚魂術'), { target: 'p1' })).toBe('ok');
+    run(f, sec(8) + 2);
+    expect(ally.dead).toBe(false);
+  });
+});

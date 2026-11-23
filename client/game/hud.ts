@@ -64,8 +64,8 @@ function statusIcons(list: SnapStatus[] | undefined, max: number, mode: StMode, 
         { class: `st ${mode} ${own ? 'mine' : ''}`, title: `${info.name}：${info.desc}${own ? '（你施加的）' : ''}` },
         statusTile(id, mode === 'me' ? 'sm' : mode === 'target' ? 'tg' : 'xs'),
         timed(mode) && left >= 0 ? h('small', null, secs(left)) : mode === 'me' && info.shield ? h('small', null, String(v)) : null,
-        // stacks (易傷, the twins' 共鳴)
-        (info.taken === 0.5 || info.name === '共鳴') && v > 1 ? h('em', null, `×${v}`) : null,
+        // stacks (易傷, the twins' 共鳴, 岩靈召喚's instants, 炎靈召喚's strikes)
+        (info.stacks ? v >= 1 : (info.taken === 0.5 || info.name === '共鳴') && v > 1) ? h('em', null, `×${v}`) : null,
       ),
     );
 }

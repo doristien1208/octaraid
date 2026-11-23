@@ -14,7 +14,12 @@ type Src = { src?: 'twin' };
  */
 export type MechDef = Src &
   (
-    | /** everyone takes it: top up and mitigate */ { k: 'raidwide'; dmg: number }
+    | /** everyone takes it: top up and mitigate; hits: that many, `gap` seconds apart (no time to top up in between) */ {
+        k: 'raidwide';
+        dmg: number;
+        hits?: number;
+        gap?: number;
+      }
     /**
      * the top of the enmity list takes it (rank 2: the second, e.g. 凍核's half of 雙死刑); with 2 hits the
      * second goes to whoever is top then (tank swap)
@@ -37,15 +42,18 @@ export type MechDef = Src &
      * on 'top': one stack on the tank for exactly `want` people (分攤死刑): more than that, the extra get hurt too
      */
     | { k: 'stack'; r: number; dmg: number; groups: number; on?: 'top'; want?: number }
-    /** pushes everyone away from the boss; where the arena edge is a cliff, off it means down */
-    | { k: 'knockback'; dist: number }
+    /**
+     * pushes everyone away from the boss; where the arena edge is a cliff, off it means down. A prison rock
+     * still standing between the boss and a player stops it (崩岩巨像 Hard: hide behind it before breaking it)
+     */
+    | { k: 'knockback'; dist: number; delay?: number }
     /** one player is shut in rock: break it within `time` or they go down; `hp` per player free to help */
     | { k: 'prison'; hp: number; time: number }
     /**
      * adds: kill them within `time` or each one left explodes for `boom`; together: the first to fall gets up
      * again unless the rest follow within 10 s; attack: what each one does meanwhile
      */
-    | { k: 'adds'; kind: FoeKind; at: [number, number][]; hp: number; auto: number; time: number; boom: number; together?: boolean; attack?: AddAttack }
+    | { k: 'adds'; kind: FoeKind; at: [number, number][]; hp: number; auto: number; time: number; boom: number; together?: boolean | number; attack?: AddAttack }
     /** the boss leaps (to a point, during the last second of the cast); land: a circle where it comes down */
     | { k: 'jump'; to?: [number, number]; land?: { r: number; dmg: number } }
     /** pairs of players tied together: be at least `dist` apart when it ends (寒冰鎖鏈) */
@@ -60,16 +68,16 @@ export type MechDef = Src &
     | { k: 'freeze'; time: number; drop?: { r: number; dmg: number; delay: number } }
     /** protean (八方扇形): a fan from the boss at every player; anyone in someone else's fan is hit twice */
     | { k: 'protean'; deg: number; dmg: number; delay?: number }
-    /** timed bombs: batches going off these many seconds after the cast; each blows up `r` around its holder */
-    | { k: 'bombs'; at: number[]; count: number | 'all'; r: number; dmg: number; self: number }
+    /** timed bombs: batches going off these many seconds after the cast; each blows up `r` around its holder; pool: and leaves one where it went off */
+    | { k: 'bombs'; at: number[]; count: number | 'all'; r: number; dmg: number; self: number; pool?: { r: number; dmg: number; time: number } }
     /** the floor's tiles live in a checkerboard: these patterns one after the other, `gap` apart; tele: warning, s */
     | { k: 'tiles'; patterns: (0 | 1)[]; gap: number; dmg: number; tele: number }
     /** beams from the boss sweeping round `turn` degrees in `time` seconds; 2 beams start on opposite sides */
     | { k: 'sweep'; beams: 1 | 2; deg: number; turn: number; time: number; dmg: number }
     /** numbered marks (序列點名): in order, a strip from the boss through each marked player */
     | { k: 'sequence'; count: number | 'all'; w: number; gap: number; dmg: number }
-    /** a circle on each of the top `n` of the enmity list (雙重鑽擊); apart: they must not overlap */
-    | { k: 'drill'; n: number; r: number; dmg: number; apart?: boolean }
+    /** a circle on each of the top `n` of the enmity list (雙重鑽擊), or the `n` furthest from the boss (far); apart: they must not overlap */
+    | { k: 'drill'; n: number; r: number; dmg: number; apart?: boolean; far?: boolean }
     /** the boss charges at marked players in turn (熔核衝撞): a strip from it to the arena edge through each */
     | { k: 'charge'; count: number; w: number; dmg: number; gap: number }
     /** half of the arena each (炎冰交錯): west by the boss, east by its twin, the first chosen at random */
@@ -83,6 +91,14 @@ export type MechDef = Src &
     | { k: 'fans8'; dmg: number; gap: number; towers?: { need: number; r: number; dmg: number; fail: number } }
     /** the twins at once (冰刃迴旋): a circle around the boss, a donut around its twin; swap: they trade places first */
     | { k: 'twinCircles'; r: number; r0: number; dmg: number; swap?: boolean }
+    /** a circle under every player `after` seconds after the cast, going off `delay` seconds later: move off your spot */
+    | { k: 'drop'; r: number; dmg: number; delay: number; after?: number }
+    /** the fans the adds of this fight fired, again from where they stood, in the order they first fired, `gap` apart (鏡中預言) */
+    | { k: 'replay'; gap: number; dmg: number }
+    /** another mechanic going off `after` seconds later than the cast ends (its telegraph still shows ahead as usual) */
+    | { k: 'later'; after: number; mech: MechDef }
+    /** one of these, chosen at random when the cast begins */
+    | { k: 'either'; of: MechDef[] }
   );
 
 /** What adds do while they live. */
@@ -102,6 +118,8 @@ export interface Entry {
   mechs: MechDef[];
   /** whose cast bar shows it: the boss (default), its twin, or both */
   by?: 'twin' | 'both';
+  /** its telegraphs show only for this many seconds from the start of the cast, then go on hidden: remember them (Hard) */
+  memo?: number;
 }
 
 export interface Phase {
@@ -148,6 +166,12 @@ export interface BossScript {
   enrage: { name: string; cast: number };
   /** a second boss fought alongside (雙子機神): the fight's HP is split between them */
   twin?: Twin;
+  /**
+   * Hard: an attack that should have been dodged (circles, fans, strips, floors, beams, someone else's
+   * aimed attack) takes all of the player's max HP, so only mitigation keeps them up (v0.6: 8,000–9,000
+   * was healed through, and two healers never lost anyone to a mechanic)
+   */
+  lethal?: boolean;
 }
 
 /** A shape on the ground (or a marker over a head) that players can see, until it hits. */
@@ -170,6 +194,8 @@ export interface Tele {
   zone?: boolean;
   /** a stack for exactly its count (分攤死刑): nobody else should join */
   exact?: boolean;
+  /** players see it only until this tick, though it still goes off at `end` (an attack to remember) */
+  hideAt?: number;
 }
 
 /** One cast's mechanics: when all of them are done without a mistake, the Limit Break gauge gains 5%. */
@@ -238,6 +264,12 @@ export class BossBrain {
   private swept = new Map<string, number>();
   /** where the cast being scheduled leaps the boss to (its other mechanics happen from there) */
   private landTo: [number, number] | null = null;
+  /** the cast being scheduled hides its telegraphs from this tick on (Entry.memo) */
+  private memoAt: number | null = null;
+  /** adds that must fall together: how long the rest have once the first falls (ticks) */
+  private togetherTicks = sec(10);
+  /** each add's first fan, in the order they fired (鏡中預言 fires them again) */
+  private echoes: { id: string; shape: Shape }[] = [];
 
   constructor(
     private readonly fight: Fight,
@@ -271,7 +303,7 @@ export class BossBrain {
   visible(): Tele[] {
     const t = this.fight.tick;
     const out: Tele[] = [];
-    for (const p of this.pending) if (p.tele?.shown && p.tele.start <= t && p.tele.end >= t) out.push(p.tele);
+    for (const p of this.pending) if (p.tele?.shown && p.tele.start <= t && p.tele.end >= t && !(p.tele.hideAt !== undefined && t >= p.tele.hideAt)) out.push(p.tele);
     for (const p of this.puddles) out.push(p.tele);
     return out;
   }
@@ -445,14 +477,16 @@ export class BossBrain {
     const group: Group = { name: e.name, left: 0, failed: false, scored: false };
     const jump = e.mechs.find((x) => x.k === 'jump' && x.to && x.src !== 'twin');
     this.landTo = jump && jump.k === 'jump' && jump.to ? clampToArena(f.enc.arena, jump.to[0], jump.to[1], this.foe.r) : null;
+    this.memoAt = e.memo ? t0 + sec(e.memo) : null;
     for (const mech of e.mechs) this.schedule(mech, t0, t1, group, top);
     this.landTo = null;
+    this.memoAt = null;
   }
 
   private add(at: number, group: Group, run: () => void, tele?: Omit<Tele, 'id' | 'end' | 'shown'> & { shown?: boolean }): void {
     group.left++;
     const p: Pending = { at, group, run };
-    if (tele) p.tele = { ...tele, id: ++this.seq, end: at, shown: tele.shown ?? true };
+    if (tele) p.tele = { ...tele, id: ++this.seq, end: at, shown: tele.shown ?? true, hideAt: this.memoAt ?? undefined };
     this.pending.push(p);
   }
 
@@ -498,10 +532,12 @@ export class BossBrain {
     const size = f.enc.arena.size;
     switch (m.k) {
       case 'raidwide':
-        this.add(t1, g, () => {
-          this.bossEvent('raidwide', g.name, undefined, boss);
-          for (const q of f.living()) f.hurt(q, m.dmg, boss);
-        });
+        for (let k = 0; k < (m.hits ?? 1); k++) {
+          this.add(t1 + sec(m.gap ?? 1.5) * k, g, () => {
+            this.bossEvent('raidwide', g.name, undefined, boss);
+            for (const q of f.living()) f.hurt(q, m.dmg, boss);
+          });
+        }
         return;
       case 'buster': {
         const gap = sec(m.gap ?? 4);
@@ -635,8 +671,9 @@ export class BossBrain {
       }
       case 'knockback': {
         g.scored = true;
+        const at = t1 + sec(m.delay ?? 0);
         const shape: Shape = { k: 'push', x: boss.x, z: boss.z, dist: m.dist };
-        this.add(t1, g, () => this.knockAll(m.dist, g, boss), { shape, color: 'w', start: this.teleStart(t1, t0) });
+        this.add(at, g, () => this.knockAll(m.dist, g, boss), { shape, color: 'w', start: this.teleStart(at, t0) });
         return;
       }
       case 'prison':
@@ -843,6 +880,7 @@ export class BossBrain {
                   this.miss(o, g);
                 }
               }
+              if (m.pool) this.puddle(h.x, h.z, m.pool, g.name, boss);
             },
             { shape: { k: 'bomb', r: m.r }, color: 'p', on: q.id, start: t0 },
           );
@@ -913,7 +951,9 @@ export class BossBrain {
       }
       case 'drill': {
         g.scored = true;
-        const marked = this.ranked().slice(0, m.n);
+        const marked = m.far
+          ? [...f.living()].sort((a, b) => Math.hypot(b.x - boss.x, b.z - boss.z) - Math.hypot(a.x - boss.x, a.z - boss.z)).slice(0, m.n)
+          : this.ranked().slice(0, m.n);
         for (const q of marked) {
           this.add(
             t1,
@@ -923,8 +963,8 @@ export class BossBrain {
               if (!h || h.dead) return;
               for (const o of f.living()) {
                 if (Math.hypot(o.x - h.x, o.z - h.z) > m.r) continue;
-                // aimed at the top of the list like a tank buster: half on anyone who is not a tank
-                f.hurt(o, m.dmg * (o.role === 'tank' ? 1 : RULES.noTankDamage), boss);
+                // aimed at the top of the list like a tank buster: half on anyone who is not a tank (the far ones hit everyone alike)
+                f.hurt(o, m.far ? m.dmg : m.dmg * (o.role === 'tank' ? 1 : RULES.noTankDamage), boss);
                 // the other marked player's circle on top of this one: both got it wrong
                 if (o.id !== h.id && (m.apart || !marked.some((x) => x.id === o.id))) this.miss(o, g);
               }
@@ -1069,6 +1109,32 @@ export class BossBrain {
         }
         return;
       }
+      case 'later':
+        this.schedule(m.mech, t0, t1 + sec(m.after), g, top);
+        return;
+      case 'either':
+        if (m.of.length) this.schedule(m.of[Math.floor(f.random() * m.of.length)]!, t0, t1, g, top);
+        return;
+      case 'drop': {
+        g.scored = true;
+        // where everyone stands `after` seconds past the cast: whoever stays put is hit
+        this.add(t1 + sec(m.after ?? 0), g, () => {
+          for (const q of f.living()) {
+            const shape: Shape = { k: 'circle', x: q.x, z: q.z, r: m.r };
+            this.add(f.tick + sec(m.delay), g, () => this.areaHit(shape, m.dmg, g, boss), { shape, color: 'o', start: f.tick });
+          }
+        });
+        return;
+      }
+      case 'replay': {
+        g.scored = true;
+        // remembered, not shown: the fans the adds fired, in the order they first fired
+        this.echoes.forEach((e, k) => {
+          const at = t1 + sec(m.gap) * k;
+          this.add(at, g, () => this.areaHit(e.shape, m.dmg, g, boss), { shape: e.shape, color: 'o', start: t0, shown: false });
+        });
+        return;
+      }
       case 'twinCircles': {
         g.scored = true;
         const tw = this.twin;
@@ -1139,12 +1205,17 @@ export class BossBrain {
     }
   }
 
+  /** What standing in an attack that should have been dodged costs: on Hard (`lethal`), all of the max HP. */
+  private dodgeDmg(q: Fighter, dmg: number): number {
+    return this.script.lethal ? Math.max(dmg, this.fight.maxHp(q)) : dmg;
+  }
+
   /** Everyone inside takes the hit and counts a mistake. */
   private areaHit(shape: Shape, dmg: number, g: Group, src: Foe): void {
     const f = this.fight;
     for (const q of f.living()) {
       if (!inside(shape, q.x, q.z) || q.statuses.some((s) => s.id === 'airborne')) continue;
-      f.hurt(q, dmg, src);
+      f.hurt(q, this.dodgeDmg(q, dmg), src);
       this.miss(q, g);
     }
   }
@@ -1154,7 +1225,7 @@ export class BossBrain {
     const f = this.fight;
     for (const q of f.living()) {
       if (!inside(shape, q.x, q.z) || q.statuses.some((s) => s.id === 'airborne')) continue;
-      f.hurt(q, dmg, src);
+      f.hurt(q, q.id === target ? dmg : this.dodgeDmg(q, dmg), src);
       if (q.id !== target) this.miss(q, g);
     }
   }
@@ -1167,7 +1238,7 @@ export class BossBrain {
       const k = `${key}/${q.id}`;
       if (f.tick - (this.swept.get(k) ?? -999) < sec(1)) continue;
       this.swept.set(k, f.tick);
-      f.hurt(q, dmg, src);
+      f.hurt(q, this.dodgeDmg(q, dmg), src);
       this.miss(q, g);
     }
   }
@@ -1221,8 +1292,10 @@ export class BossBrain {
   private knockAll(dist: number, g: Group, boss: Foe): void {
     const f = this.fight;
     const lim = f.enc.arena.size - RULES.playerRadius;
+    const rocks = f.foes.filter((e) => e.kind === 'prison' && e.hp > 0 && !e.gone);
     for (const q of f.living()) {
-      if (q.statuses.some((s) => s.id === 'airborne')) continue;
+      if (q.statuses.some((s) => s.id === 'airborne' || STATUS_STUN.has(s.id))) continue;
+      if (rocks.some((r) => sheltered(boss, r, q.x, q.z))) continue;
       let dx = q.x - boss.x;
       let dz = q.z - boss.z;
       const d = Math.hypot(dx, dz);
@@ -1281,12 +1354,15 @@ export class BossBrain {
     this.addsDeadline = f.tick + sec(m.time);
     this.addsBoom = m.boom;
     this.together = !!m.together;
+    this.togetherTicks = sec(typeof m.together === 'number' ? m.together : 10);
     this.addAttack = m.attack ?? null;
     this.addNext.clear();
     this.addTurn = 0;
+    this.echoes = [];
     if (m.attack) {
-      // the adds take turns: spread their first attacks over one period
-      this.adds.forEach((a, k) => this.addNext.set(a.id, f.tick + sec(m.attack!.first + (m.attack!.every * k) / this.adds.length)));
+      // the adds take turns: spread their first attacks over one period (on Hard in a random order, worth remembering)
+      const order = f.hard ? this.shuffle(this.adds) : this.adds;
+      order.forEach((a, k) => this.addNext.set(a.id, f.tick + sec(m.attack!.first + (m.attack!.every * k) / order.length)));
     }
     this.bossEvent('adds', '');
   }
@@ -1311,7 +1387,7 @@ export class BossBrain {
     if (this.addAttack) for (const a of alive) this.addStrike(a, this.addAttack);
     if (this.together) {
       const dead = this.adds.filter((a) => a.hp <= 0);
-      if (dead.length && !this.reviveAt) this.reviveAt = f.tick + sec(10);
+      if (dead.length && !this.reviveAt) this.reviveAt = f.tick + this.togetherTicks;
       if (this.reviveAt && f.tick >= this.reviveAt) {
         this.reviveAt = 0;
         for (const a of dead) {
@@ -1335,6 +1411,7 @@ export class BossBrain {
     if (atk.k === 'cone') {
       const g: Group = { name: `${a.name}光束`, left: 0, failed: false, scored: true };
       const shape: Shape = { k: 'cone', x: a.x, z: a.z, f: a.f, r: atk.r, deg: atk.deg };
+      if (!this.echoes.some((e) => e.id === a.id)) this.echoes.push({ id: a.id, shape });
       this.add(hit, g, () => (a.hp > 0 && !a.gone ? this.areaHit(shape, atk.dmg, g, a) : undefined), { shape, color: 'o', start: f.tick });
       return;
     }
@@ -1444,4 +1521,19 @@ export class BossBrain {
     g.failed = true;
     this.fight.fail(q, g.name);
   }
+}
+
+/** Statuses that hold a player in place (a prison, a freeze): no knockback moves them. */
+const STATUS_STUN = new Set(['stun', 'frozen']);
+
+/** A prison rock stands between the boss and (x, z), close enough to the line to stop a knockback. */
+export function sheltered(boss: { x: number; z: number }, rock: { x: number; z: number; r: number }, x: number, z: number): boolean {
+  const dx = x - boss.x;
+  const dz = z - boss.z;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.01) return false;
+  const along = ((rock.x - boss.x) * dx + (rock.z - boss.z) * dz) / len;
+  if (along <= 0 || along >= len) return false;
+  const off = Math.abs((rock.x - boss.x) * dz - (rock.z - boss.z) * dx) / len;
+  return off <= rock.r + 0.4;
 }

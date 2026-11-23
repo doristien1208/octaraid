@@ -9,6 +9,11 @@ export const ROLE_CAPS: Readonly<Record<Role, number>> = { tank: 2, healer: 2, d
  */
 export const ROLE_WEIGHT: Readonly<Record<Role, number>> = { tank: 0.65, healer: 0.55, dps: 1 };
 export const BASE_WEIGHT = ROLE_WEIGHT.tank + ROLE_WEIGHT.healer + 2 * ROLE_WEIGHT.dps;
+/**
+ * A second healer counts for more than its damage: two healers doubled the healing and the raises at no
+ * cost in time, which made 1 tank, 2 healers, 2 DPS the easy way through Hard (play-test, v0.6).
+ */
+export const SECOND_HEALER_WEIGHT = 0.8;
 
 export function roleCounts(jobs: readonly JobId[]): Record<Role, number> {
   const out: Record<Role, number> = { tank: 0, healer: 0, dps: 0 };
@@ -19,7 +24,11 @@ export function roleCounts(jobs: readonly JobId[]): Record<Role, number> {
 /** Boss HP as a share of the 4-player baseline (1 = 100%). */
 export function hpScale(jobs: readonly JobId[]): number {
   let w = 0;
-  for (const j of jobs) w += ROLE_WEIGHT[jobById(j).role];
+  let healers = 0;
+  for (const j of jobs) {
+    const role = jobById(j).role;
+    w += role === 'healer' && healers++ > 0 ? SECOND_HEALER_WEIGHT : ROLE_WEIGHT[role];
+  }
   return w / BASE_WEIGHT;
 }
 

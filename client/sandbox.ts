@@ -17,7 +17,7 @@ import { GameView } from './game/view';
  * dummy instead of the duty's boss; calm: a dummy that does not attack, for measuring damage; lb: the
  * Limit Break gauge starts full; skip: a computer player plays my character for the first that many seconds,
  * then it is mine (to practise a later part of the fight); until: the same, up to when the boss starts
- * casting the move of that name. ?sandbox&gallery lines all 8 jobs up facing the camera, to compare their
+ * casting the move of that name. ?sandbox&gallery lines all 9 jobs up facing the camera, to compare their
  * looks (&shot: without the HUD, for a group picture such as the hub thumbnail).
  */
 export function startSandbox(app: HTMLElement, audio: Audio): void {

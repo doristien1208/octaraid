@@ -25,6 +25,7 @@ export function iconTile(name: string, size: 'sm' | 'md' | 'lg'): HTMLElement {
 const STATUS_SKILL: Partial<Record<StatusId, string>> = {
   starShield: '星盾術',
   airborne: '天降擊',
+  stoneGuard: '岩靈召喚',
 };
 
 /**

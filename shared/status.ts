@@ -58,7 +58,14 @@ export type StatusId =
   | 'sunBurn'
   | 'starRot'
   | 'venom'
-  | 'scorch';
+  | 'scorch'
+  // 喚靈術士 (v0.6)
+  | 'stoneSpirit'
+  | 'stoneGuard'
+  | 'flameSpirit'
+  | 'radiance'
+  | 'spiritShield'
+  | 'starDragon';
 
 export interface StatusInfo {
   name: string;
@@ -85,6 +92,12 @@ export interface StatusInfo {
   castCut?: number;
   /** the next spell is instant (consumed by it) */
   swift?: boolean;
+  /** the next spells are instant, as many as its value (岩靈召喚: one used up each) */
+  instants?: boolean;
+  /** the job's basic skill (slot 0) hits with this potency instead, as many times as its value (炎靈召喚) */
+  empower?: number;
+  /** shows its value as stacks */
+  stacks?: boolean;
   /** absorbs damage: the instance's value is what is left */
   shield?: boolean;
   /** heals (or with `dot`, damages) its value every second, paid out in 3-second ticks */
@@ -176,6 +189,13 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   starRot: { name: '星蝕', icon: '腐', good: false, desc: '每秒受到持續傷害', dot: true },
   venom: { name: '毒牙箭', icon: '毒', good: false, desc: '每秒受到持續傷害', dot: true },
   scorch: { name: '灼燒咒', icon: '燒', good: false, desc: '每秒受到持續傷害', dot: true },
+  // 喚靈術士 (v0.6; new ones go at the end: snapshots send the index)
+  stoneSpirit: { name: '岩靈召喚', icon: '岩', good: true, desc: '接下來的魔法免詠唱（剩下的次數）', instants: true, stacks: true },
+  stoneGuard: { name: '岩靈護盾', icon: '岩', good: true, desc: '吸收傷害的護盾', shield: true },
+  flameSpirit: { name: '炎靈召喚', icon: '炎', good: true, desc: '靈光彈變成炎靈之擊，威力 600（剩下的次數）', empower: 600, stacks: true },
+  radiance: { name: '靈光閃耀', icon: '耀', good: true, desc: '傷害 +5%', dmg: 0.05 },
+  spiritShield: { name: '靈盾', icon: '盾', good: true, desc: '吸收傷害的護盾', shield: true },
+  starDragon: { name: '星龍降臨', icon: '龍', good: true, desc: '星龍在身邊作戰：每 3 秒吐息，最後星龍焰' },
 };
 
 export const STATUS_IDS = Object.keys(STATUS) as StatusId[];

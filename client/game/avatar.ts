@@ -182,6 +182,7 @@ export class Avatar {
   private readonly marker: THREE.Mesh | null = null;
   private dead = false;
   private casting = false;
+  private dragon: THREE.Group | null = null;
 
   constructor(
     readonly job: Job,
@@ -351,6 +352,7 @@ export class Avatar {
       }
       case 'orbs':
       case 'runes':
+      case 'spirit':
         break; // orbiters, added in addOrbiters
     }
   }
@@ -366,6 +368,14 @@ export class Avatar {
     };
     if (extras.includes('orbs')) orbit(3, '#b9a4ff', 0.75, 1.15, 1.6);
     if (extras.includes('runes')) orbit(2, '#ff5a2c', 0.7, 0.95, 2.4);
+    if (extras.includes('spirit')) {
+      // 喚靈術士's spirit: a little glowing ball with a tail of sparks, drifting round at head height
+      const spirit = new THREE.Group();
+      spirit.add(mesh(ball(0.16), toon('#9ff0d0', 1)));
+      for (let k = 0; k < 3; k++) spirit.add(mesh(gem(0.05), toon('#ffe58a', 1), -0.14 - k * 0.1, -0.04 * k, 0));
+      this.holder.add(spirit);
+      this.orbiters.push({ obj: spirit, radius: 0.85, height: 1.55, speed: 1.1, phase: 0 });
+    }
   }
 
   // ------------------------------------------------------------------ playing
@@ -431,6 +441,71 @@ export class Avatar {
     this.plate.classList.toggle('offline', off);
   }
 
+  /** 星龍降臨: a code-built dragon hovering behind and above the character while the status lasts */
+  setDragon(on: boolean): void {
+    if (on === !!this.dragon) return;
+    if (!on) {
+      this.holder.remove(this.dragon!);
+      this.dragon = null;
+      return;
+    }
+    const body = toon('#1f8f6f', 0.15);
+    const gold = toon('#e8c45a', 0.25);
+    const d = new THREE.Group();
+    const torso = mesh(ball(0.5), body, 0, 0, 0);
+    torso.scale.set(0.75, 0.7, 1.5);
+    d.add(torso);
+    const belly = mesh(ball(0.32), gold, 0, -0.16, 0.3);
+    belly.scale.set(0.9, 0.7, 1.4);
+    d.add(belly);
+    const head = new THREE.Group();
+    head.add(mesh(ball(0.3), body));
+    head.add(mesh(box(0.26, 0.2, 0.42), body, 0, -0.05, 0.34));
+    for (const side of [1, -1]) {
+      const horn = mesh(cone(0.06, 0.38), gold, side * 0.14, 0.28, -0.12);
+      horn.rotation.x = -0.7;
+      head.add(horn);
+      head.add(mesh(ball(0.055), toon('#ffe58a', 1), side * 0.14, 0.08, 0.24));
+    }
+    head.position.set(0, 0.45, 0.95);
+    d.add(head);
+    // wings: flat, both faces drawn, beating from the shoulders
+    const outline = new THREE.Shape();
+    outline.moveTo(0, 0);
+    outline.lineTo(1.5, 0.35);
+    outline.lineTo(1.2, -0.25);
+    outline.lineTo(0.75, -0.55);
+    outline.lineTo(0.2, -0.45);
+    outline.lineTo(0, 0);
+    const wingGeo = new THREE.ShapeGeometry(outline);
+    const membrane = new THREE.MeshToonMaterial({ color: '#2fb88f', emissive: '#2fb88f', emissiveIntensity: 0.25, side: THREE.DoubleSide, gradientMap: toonGradient() });
+    for (const side of [1, -1]) {
+      const wing = new THREE.Group();
+      const w = new THREE.Mesh(wingGeo, membrane);
+      w.rotation.x = -Math.PI / 2;
+      w.scale.x = side;
+      wing.add(w);
+      wing.position.set(side * 0.3, 0.3, 0.1);
+      wing.userData.side = side;
+      d.add(wing);
+    }
+    const tail = mesh(cone(0.16, 1.2), body, 0, -0.05, -1.25);
+    tail.rotation.x = -Math.PI / 2;
+    d.add(tail);
+    d.add(mesh(gem(0.12), gold, 0, -0.05, -1.9));
+    d.position.set(0.7, 3, -1.6);
+    d.scale.setScalar(0.85);
+    this.dragon = d;
+    this.holder.add(d);
+  }
+
+  /** Where the dragon's mouth is in the world, for its breath (null without a dragon). */
+  dragonMouth(): THREE.Vector3 | null {
+    if (!this.dragon) return null;
+    this.dragon.updateWorldMatrix(true, false);
+    return this.dragon.localToWorld(new THREE.Vector3(0, 0.35, 1.2));
+  }
+
   /** hides the ring under my own character (the gallery's group picture) */
   hideMarker(): void {
     if (this.marker) this.marker.visible = false;
@@ -443,6 +518,11 @@ export class Avatar {
     this.holder.rotation.y = f;
     this.anim?.update(dt, moving && !this.dead);
     this.code?.update(moving && !this.dead, dt, time);
+    if (this.dragon) {
+      // it bobs and beats its wings
+      this.dragon.position.y = 3 + Math.sin(time * 2.2) * 0.15;
+      for (const c of this.dragon.children) if (c.userData.side) c.rotation.z = c.userData.side * Math.sin(time * 6) * 0.5;
+    }
     for (const o of this.orbiters) {
       const a = time * o.speed + o.phase;
       o.obj.position.set(Math.cos(a) * o.radius, o.height + Math.sin(a * 2) * 0.08, Math.sin(a) * o.radius);

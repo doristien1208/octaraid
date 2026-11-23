@@ -1,14 +1,14 @@
 import type { StatusId } from './status';
 
 /**
- * The 8 jobs (2 tanks, 2 healers, 4 DPS) and their 10 skills, plus 疾走 for everyone, as in section 五 of
- * the design doc. Skills 1–5 are the original kits (computer players count on those slots), 6–10 came
+ * The 9 jobs (2 tanks, 2 healers, 5 DPS; 喚靈術士 came in v0.6) and their 10 skills, plus 疾走 for
+ * everyone, as in section 五 of the design doc. Skills 1–5 are the original kits (computer players count on those slots), 6–10 came
  * with v0.5 (FF14's job and role actions as the model; the names are original). `fx` is what the
  * simulation (shared/sim/fight.ts) carries out; `desc` says the same thing in words for the waiting room
  * and the hotbar, so change both together.
  */
 export type Role = 'tank' | 'healer' | 'dps';
-export type JobId = 'guardian' | 'berserker' | 'priest' | 'warden' | 'brawler' | 'lancer' | 'ranger' | 'sorcerer';
+export type JobId = 'guardian' | 'berserker' | 'priest' | 'warden' | 'brawler' | 'lancer' | 'ranger' | 'sorcerer' | 'summoner';
 
 /**
  * One step of a skill. Distances are metres, durations seconds, potency × 10 is the damage.
@@ -34,7 +34,7 @@ export type Fx =
   /** a shield on the target that absorbs `amount` damage */
   | { k: 'shield'; s: StatusId; amount: number; dur: number }
   | { k: 'partyShield'; s: StatusId; r: number; amount: number; dur: number }
-  /** a status on me, on the target, or on the party (within r metres of me; no r = everyone); v: its value (heal per second) */
+  /** a status on me, on the target, or on the party (within r metres of me; no r = everyone); v: its value (heal per second, or stacks) */
   | { k: 'buff'; s: StatusId; dur: number; who: 'me' | 'target' | 'party'; r?: number; v?: number }
   /** a circle on the ground at my feet; its status applies to whoever stands in it (ley: only to me) */
   | { k: 'zone'; s: StatusId; r: number; dur: number }
@@ -51,7 +51,12 @@ export type Fx =
   /** a blink to the ally target (焰影步) */
   | { k: 'toAlly'; dur: number }
   /** a blink back to the middle of my own zone of this kind (歸泉) */
-  | { k: 'toZone'; s: StatusId; dur: number };
+  | { k: 'toZone'; s: StatusId; dur: number }
+  /**
+   * a summoned creature fighting beside me (星龍降臨): it hits my target with `p` every `every` seconds,
+   * `count` times, then `final` (a circle of `r` at the target); status `s` is on me while it is out
+   */
+  | { k: 'pet'; s: StatusId; every: number; p: number; count: number; final?: { r: number; p: number } };
 
 /** enemy: attacks; ally: heals (myself included); other: an ally that is not me; dead: raises; self: needs no target */
 export type SkillTarget = 'enemy' | 'ally' | 'other' | 'dead' | 'self';
@@ -118,6 +123,7 @@ const SWIFTCAST = ogcd('迅唱', 40, '下一個魔法免詠唱', self([{ k: 'buf
 const FEINT = ogcd('卸力', 90, '10 m 內目標：造成的傷害 −10%，10 秒', { target: 'enemy', range: 10, fx: [{ k: 'debuff', s: 'feint', dur: 10 }] });
 const TRUE_NORTH = ogcd('八方步', 45, '10 秒內不必站背面或側面也有身位加成', self([{ k: 'buff', s: 'trueNorth', dur: 10, who: 'me' }]));
 const SECOND_WIND = ogcd('回氣', 120, '回復自身 20% 最大 HP', self([{ k: 'healSelf', pct: 0.2 }]));
+const ADDLE = ogcd('蝕力咒', 90, '25 m 內目標：造成的傷害 −10%，10 秒', { target: 'enemy', range: RANGED, fx: [{ k: 'debuff', s: 'addle', dur: 10 }] });
 
 export const JOBS: readonly Job[] = [
   {
@@ -343,7 +349,34 @@ export const JOBS: readonly Job[] = [
       ogcd('歸泉', 5, '瞬移回自己的魔力湧泉中心（湧泉還在時才能用）', { target: 'self', range: 0, needsZone: 'ley', fx: [{ k: 'toZone', s: 'ley', dur: 0.25 }] }),
       gcd('灼燒咒', 0, 0, '25 m，威力 100，加 24 秒持續傷害、每秒威力 15（移動時的瞬發技）', { target: 'enemy', range: RANGED, spell: true, fx: [hit(100), { k: 'dot', s: 'scorch', p: 15, dur: 24 }] }),
       ogcd('焰幕', 120, '自身護盾（最大 HP 30%），20 秒', self([{ k: 'selfShield', s: 'flameVeil', pct: 0.3, dur: 20 }])),
-      ogcd('蝕力咒', 90, '25 m 內目標：造成的傷害 −10%，10 秒', { target: 'enemy', range: RANGED, fx: [{ k: 'debuff', s: 'addle', dur: 10 }] }),
+      ADDLE,
+    ],
+  },
+  {
+    id: 'summoner',
+    name: '喚靈術士',
+    role: 'dps',
+    sub: '法系',
+    icon: '喚',
+    weapon: '靈典',
+    colors: { main: '#1f9d74', trim: '#d9b44a' },
+    model: 'Rogue_Hooded',
+    desc: '召喚岩靈、炎靈與星龍作戰，能復活隊友',
+    skills: [
+      gcd('靈光彈', 1.5, 0, '25 m，威力 265（炎靈召喚之後變成炎靈之擊，威力 600）', { target: 'enemy', range: RANGED, spell: true, fx: [hit(265)] }),
+      gcd('靈光爆', 2, 0, '目標處 5 m 圓形，威力 160（打小怪）', { target: 'enemy', range: RANGED, spell: true, fx: [{ k: 'circle', at: 'target', r: 5, p: 160 }] }),
+      ogcd('岩靈召喚', 30, '15 秒內接下來 4 個魔法免詠唱，並得到最大 HP 10% 的護盾', self([{ k: 'buff', s: 'stoneSpirit', dur: 15, who: 'me', v: 4 }, { k: 'selfShield', s: 'stoneGuard', pct: 0.1, dur: 15 }])),
+      ogcd('炎靈召喚', 30, '20 秒內接下來 2 個靈光彈變成炎靈之擊，威力 600', self([{ k: 'buff', s: 'flameSpirit', dur: 20, who: 'me', v: 2 }])),
+      ogcd('星龍降臨', 120, '星龍出現 15 秒：每 3 秒對目標吐息，威力 250；最後的星龍焰在目標處 8 m，威力 1,200', {
+        target: 'enemy',
+        range: RANGED,
+        fx: [{ k: 'pet', s: 'starDragon', every: 3, p: 250, count: 5, final: { r: 8, p: 1200 } }],
+      }),
+      ogcd('靈光閃耀', 120, '20 m 內全隊傷害 +5%，20 秒', self([{ k: 'buff', s: 'radiance', dur: 20, who: 'party', r: 20 }])),
+      gcd('喚魂術', 8, 120, '復活 1 名倒地隊友（迅唱或岩靈召喚可讓它瞬發）', { target: 'dead', range: HEAL, spell: true, fx: [{ k: 'raise' }] }),
+      ogcd('靈盾', 90, '自身護盾（最大 HP 25%），20 秒', self([{ k: 'selfShield', s: 'spiritShield', pct: 0.25, dur: 20 }])),
+      SWIFTCAST,
+      ADDLE,
     ],
   },
 ];
@@ -396,4 +429,5 @@ export const DEFAULT_JOB_ORDER: readonly JobId[] = [
   'warden',
   'lancer',
   'sorcerer',
+  'summoner',
 ];

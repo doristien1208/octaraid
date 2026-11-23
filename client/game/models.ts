@@ -81,8 +81,9 @@ const HAIR: Readonly<Record<JobId, string>> = {
   lancer: '#1d3a3a',
   ranger: '#7a4a24',
   sorcerer: '#1e1a24',
+  summoner: '#2f4a3a',
 };
-const ROBES: ReadonlySet<JobId> = new Set(['priest', 'warden', 'sorcerer']);
+const ROBES: ReadonlySet<JobId> = new Set(['priest', 'warden', 'sorcerer', 'summoner']);
 
 interface Orbiter {
   obj: THREE.Object3D;

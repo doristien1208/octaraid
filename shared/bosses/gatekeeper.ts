@@ -7,7 +7,11 @@ import type { BossScript, Entry } from '../sim/boss';
  * sends two drones that shoot down a line at someone; break them and it comes back. Hard: the armour-
  * piercing shot hits twice (swap tanks), the floor gives 1.5 s and switches pattern, bombs on everyone
  * with the floor at the same time, a chariot right after the protean, two sweeping beams, numbered
- * shots, and the drones leave pools where they hit.
+ * shots, and the drones leave pools where they hit. Since v0.6 Hard also lays them on top of each other:
+ * 通電序列 (the floor switching every 3.5 s under the numbered shots), 雷射引導 (the
+ * unmarked protean, drills on the two furthest and a chariot right after) and drones that must fall
+ * within 8 s of each other. What should have been dodged takes all of a player's HP (`lethal`); the
+ * overload pulse hits twice.
  *
  * Times are when casts start, in seconds from the start of the phase. Damage is for 10,000 HP (healers,
  * DPS) and 14,000 (tanks).
@@ -15,7 +19,7 @@ import type { BossScript, Entry } from '../sim/boss';
 export function gatekeeper(hard: boolean): BossScript {
   const H = <T>(normal: T, hardValue: T): T => (hard ? hardValue : normal);
 
-  const pulse = (at: number): Entry => ({ at, name: '過載脈衝', cast: 4, mechs: [{ k: 'raidwide', dmg: H(3500, 6500) }] });
+  const pulse = (at: number): Entry => ({ at, name: '過載脈衝', cast: 4, mechs: [hard ? { k: 'raidwide', dmg: 3800, hits: 2, gap: 1.5 } : { k: 'raidwide', dmg: 3500 }] });
   const pierce = (at: number): Entry => ({
     at,
     name: '穿甲彈',
@@ -57,7 +61,30 @@ export function gatekeeper(hard: boolean): BossScript {
     cast: 4,
     mechs: [hard ? { k: 'sweep', beams: 2, deg: 22, turn: 180, time: 6, dmg: 8000 } : { k: 'sweep', beams: 1, deg: 22, turn: 360, time: 9, dmg: 5000 }],
   });
-  const sequence = (at: number): Entry => ({ at, name: '序列點名', cast: 4, mechs: [{ k: 'sequence', count: 'all', w: 4, gap: 1.5, dmg: 4000 }] });
+  // Hard (v0.6): the compound casts
+  /** the floor switching every 3.5 s for 14 s, and the numbered shots (序列點名) from 1.5 s in: stand on a safe tile in your lane */
+  const circuit = (at: number): Entry => ({
+    at,
+    name: '通電序列',
+    cast: 4,
+    mechs: [
+      { k: 'tiles', patterns: [0, 1, 0, 1], gap: 3.5, dmg: 8000, tele: 2 },
+      // everyone's own strip is lighter than usual: the floor keeps the healers moving
+      { k: 'later', after: 1.5, mech: { k: 'sequence', count: 'all', w: 4, gap: 2, dmg: 3000 } },
+    ],
+  });
+  /** the unmarked protean, drills on the two furthest, then the chariot */
+  const laserLead = (at: number): Entry => ({
+    at,
+    name: '雷射引導',
+    cast: 5,
+    mechs: [
+      // the two furthest take their own fan and a drill: 7,500 together, so mitigate and stay topped up
+      { k: 'protean', deg: 40, dmg: 4000 },
+      { k: 'drill', n: 2, r: 4, dmg: 3500, apart: true, far: true },
+      { k: 'chariot', r: 9, dmg: 8000, delay: 2.5 },
+    ],
+  });
 
   return {
     kind: 'gatekeeper',
@@ -65,15 +92,16 @@ export function gatekeeper(hard: boolean): BossScript {
     tele: H(3.5, 2.5),
     hidden: hard ? ['protean'] : [],
     edge: 'wall',
+    lethal: hard,
     enrage: { name: '全開火', cast: 10 },
     phases: [
       {
         name: '守門機兵',
         hpBelow: 0.5,
         entries: hard
-          ? [pulse(8), pierce(18), floor(32, 0), lasers(44), sequence(56), drill(70), bombs(80), sweep(118), pulse(132)]
+          ? [pulse(8), pierce(18), floor(30, 0), laserLead(42), drill(58), circuit(70), sweep(100), pulse(112)]
           : [pulse(8), pierce(18), floor(28, 0), lasers(40), drill(52), bombs(62), sweep(90), pulse(104), pierce(114)],
-        loop: hard ? { at: 142, to: 18 } : { at: 124, to: 28 },
+        loop: hard ? { at: 122, to: 18 } : { at: 124, to: 28 },
       },
       {
         name: '過熱',
@@ -98,6 +126,8 @@ export function gatekeeper(hard: boolean): BossScript {
                 auto: 0,
                 time: H(60, 45),
                 boom: H(6000, 99999),
+                // Hard: the first to fall gets up again unless the other follows within 8 s
+                together: hard ? 8 : undefined,
                 attack: hard
                   ? { k: 'shot', w: 4, dmg: 3500, every: 8, first: 3, puddle: { r: 4, dmg: 1500, time: 20 } }
                   : { k: 'shot', w: 4, dmg: 2500, every: 7, first: 3 },
@@ -113,10 +143,10 @@ export function gatekeeper(hard: boolean): BossScript {
         entries: [
           { at: 0, name: '重新啟動', cast: 2, mechs: [{ k: 'jump', to: [0, 0] }] },
           ...(hard
-            ? [pulse(5), sequence(15), pierce(30), sweep(44), bombs(60), lasers(98), drill(110), pulse(120)]
+            ? [pulse(5), circuit(14), pierce(44), sweep(56), laserLead(70), drill(84), pulse(96)]
             : [pulse(5), sweep(15), pierce(32), bombs(42), floor(68, 1), lasers(80), drill(92), pulse(102)]),
         ],
-        loop: hard ? { at: 130, to: 15 } : { at: 112, to: 15 },
+        loop: hard ? { at: 108, to: 14 } : { at: 112, to: 15 },
       },
     ],
   };

@@ -56,6 +56,7 @@ const JOB_FX: Readonly<Record<string, { color: string; shot?: 'orb' | 'arrow' }>
   lancer: { color: '#7fe6e6' },
   ranger: { color: '#d8f5a2', shot: 'arrow' },
   sorcerer: { color: '#ff7a2c', shot: 'orb' },
+  summoner: { color: '#8ff0d0', shot: 'orb' },
 };
 
 
@@ -382,6 +383,20 @@ export class GameView {
         return this.onUse(e.i, e.s, e.st ?? 0, e.t);
       case 'dmg':
         return this.onDamage(e);
+      case 'pet': {
+        // 星龍: a breath from its mouth to the target; the last one ends in a blast on the ground
+        const mouth = this.avatars.get(e.i)?.dragonMouth();
+        const from = mouth ? { x: mouth.x, y: mouth.y, z: mouth.z } : this.where(e.i);
+        this.effects.projectile(from, () => this.where(e.t), e.f ? '#ffe58a' : '#8ff0d0', 'orb', 0.35);
+        if (e.f) {
+          const at = this.where(e.t);
+          window.setTimeout(() => {
+            this.effects.ring(at.x, at.z, 8, PLAYER_AOE, 0.8);
+            this.effects.burst(at.x, 1.5, at.z, 3, '#ffe58a', 0.5);
+          }, 350);
+        }
+        return;
+      }
       case 'heal': {
         const at = this.where(e.t);
         if (!e.hot) this.effects.sparkle(at.x, at.z, '#7dff9a', 7);
@@ -902,6 +917,7 @@ export class GameView {
       if (latest) {
         av.setDead(latest.d === 1);
         av.setShield(latest.sh > 0);
+        av.setDragon(!!latest.st?.some((x) => STATUS_IDS[x[0]] === 'starDragon'));
         av.setCasting(!!latest.c);
       }
       if (id === this.meId && this.me) {

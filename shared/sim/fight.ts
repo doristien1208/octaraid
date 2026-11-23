@@ -182,6 +182,8 @@ export class Fight {
   readonly players = new Map<string, Fighter>();
   readonly foes: Foe[] = [];
   readonly zones: Zone[] = [];
+  /** summoned creatures fighting for a player (星龍降臨) */
+  private pets: { owner: string; slot: number; target: string | null; next: number; every: number; left: number; p: number; final?: { r: number; p: number } }[] = [];
   readonly echo: number;
   /** the dummy does not attack (offline practice with ?calm); the tests switch it */
   calm: boolean;
@@ -373,6 +375,7 @@ export class Fight {
     }
     for (const p of this.players.values()) this.runQueue(p);
     this.expire();
+    this.petsStep();
     if (this.fightTicks % RULES.dotTick === 0) this.overTime();
     this.autoRaise();
     for (const foe of [...this.foes]) this.foeStep(foe);
@@ -489,9 +492,38 @@ export class Fight {
     this.execute(p, slot, target, dx, dz, false);
   }
 
+  /** Summoned creatures attack the enemy they were sent at, or the nearest one once it is gone. */
+  private petsStep(): void {
+    if (!this.pets.length) return;
+    for (const pet of this.pets) {
+      if (this.tick < pet.next) continue;
+      const p = this.players.get(pet.owner);
+      if (!p || p.dead) {
+        pet.left = 0;
+        continue;
+      }
+      pet.next = this.tick + pet.every;
+      pet.left--;
+      const target = this.foes.find((e) => e.id === pet.target && this.hittable(e)) ?? this.nearestFoe(p);
+      if (!target) continue;
+      pet.target = target.id;
+      this.damageFoe(p, target, pet.p, pet.slot, {});
+      const last = pet.left <= 0 && !!pet.final;
+      this.emit({ k: 'pet', i: p.id, t: target.id, f: last ? 1 : undefined });
+      if (last) for (const e of this.foes) if (this.hittable(e) && reach(target.x, target.z, e) <= pet.final!.r) this.damageFoe(p, e, pet.final!.p, pet.slot, {});
+    }
+    this.pets = this.pets.filter((x) => x.left > 0);
+  }
+
   private castTicks(p: Fighter, skill: SkillInfo): number {
     if (!skill.cast) return 0;
     if (skill.spell) {
+      // 岩靈召喚 first (it runs out by itself), then 迅唱
+      const stone = p.statuses.find((s) => STATUS[s.id].instants && s.v > 0);
+      if (stone) {
+        if (--stone.v <= 0) p.statuses = p.statuses.filter((s) => s !== stone);
+        return 0;
+      }
       const swift = p.statuses.findIndex((s) => STATUS[s.id].swift);
       if (swift >= 0) {
         p.statuses.splice(swift, 1);
@@ -577,6 +609,12 @@ export class Fight {
         case 'hit': {
           if (!foe || !this.hittable(foe)) break;
           let p0 = fx.p;
+          // 炎靈召喚: the basic skill hits harder while it lasts, one stack a hit
+          const emp = slot === 0 ? p.statuses.find((s) => STATUS[s.id].empower && s.v > 0) : undefined;
+          if (emp) {
+            p0 = STATUS[emp.id].empower!;
+            if (--emp.v <= 0) p.statuses = p.statuses.filter((s) => s !== emp);
+          }
           let pos: 0 | 1 | undefined;
           if (fx.rear || fx.flank) {
             // 八方步: the bonus counts from any side
@@ -657,6 +695,13 @@ export class Fight {
         case 'raise':
           if (ally) this.raise(ally, p.id, 'skill');
           break;
+        case 'pet': {
+          // a new one replaces mine that is still out
+          this.pets = this.pets.filter((x) => x.owner !== p.id);
+          this.pets.push({ owner: p.id, slot, target: foe?.id ?? null, next: this.tick + sec(fx.every), every: sec(fx.every), left: fx.count, p: fx.p, final: fx.final });
+          this.addStatus(p, { id: fx.s, src: p.id, until: this.tick + sec(fx.every * fx.count + 0.5), v: 0 }, false);
+          break;
+        }
         case 'dash': {
           let ux: number;
           let uz: number;

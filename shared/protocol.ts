@@ -148,6 +148,8 @@ export type FightEvent =
   /** c: critical hit, dh: direct hit; n: the enemy move that did it (for the combat log) */
   | { k: 'dmg'; s: string | null; t: string; a: number; ab?: number; iv?: 1; c?: 1; dh?: 1; sk?: number; pos?: 0 | 1; dot?: 1; n?: string }
   | { k: 'heal'; s: string | null; t: string; a: number; c?: 1; hot?: 1; sk?: number }
+  /** a summoned creature of player i (星龍) attacked t; f: its last, big attack */
+  | { k: 'pet'; i: string; t: string; f?: 1 }
   | { k: 'die'; i: string }
   | { k: 'raise'; i: string; by: string | null }
   /** a Limit Break went off */

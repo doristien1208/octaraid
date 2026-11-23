@@ -25,6 +25,7 @@ export const TINTS = {
   hex: ['#cdb4e6', '#3a2450'],
   arcane: ['#b8c4ff', '#3a2a9a'], // 迅唱, 魔力湧泉
   limit: ['#fff2b0', '#c0500a'],
+  spirit: ['#9ff0d0', '#3a2a7a'], // 喚靈術士's attacks (v0.6)
 } as const satisfies Record<string, readonly [string, string]>;
 export type Tint = keyof typeof TINTS;
 
@@ -118,6 +119,15 @@ export const SKILL_ICONS: Readonly<Record<string, readonly [file: string, tint: 
   鋼鐵誓約: ['lorc/surrounded-shield', 'limit'],
   黎明讚歌: ['lorc/holy-grail', 'limit'],
   破軍一擊: ['lorc/zeus-sword', 'limit'],
+  // 喚靈術士 (v0.6)
+  靈光彈: ['lorc/spark-spirit', 'spirit'],
+  靈光爆: ['lorc/explosion-rays', 'spirit'],
+  岩靈召喚: ['delapouite/golem-head', 'wind'],
+  炎靈召喚: ['lorc/flame-spin', 'fire'],
+  星龍降臨: ['lorc/dragon-head', 'spirit'],
+  靈光閃耀: ['lorc/sunbeams', 'rose'],
+  喚魂術: ['lorc/angel-outfit', 'sun'],
+  靈盾: ['lorc/magic-shield', 'shield'],
 };
 
 const FILES = import.meta.glob<string>('./icons/*/*.svg', { query: '?raw', import: 'default', eager: true });

@@ -3,8 +3,8 @@ import { JOBS, LB_SLOT, ROLE_HP, SKILL_COUNT, SPRINT_SLOT, jobById, skillAt } fr
 import { BASE_WEIGHT, ROLE_CAPS, hpScale, partyNotes, practiceParty, roleCounts, roleHasRoom } from '../shared/party';
 
 describe('jobs', () => {
-  it('are 2 tanks, 2 healers and 4 DPS with 10 skills each, plus 疾走', () => {
-    expect(roleCounts(JOBS.map((j) => j.id))).toEqual({ tank: 2, healer: 2, dps: 4 });
+  it('are 2 tanks, 2 healers and 5 DPS (喚靈術士 since v0.6) with 10 skills each, plus 疾走', () => {
+    expect(roleCounts(JOBS.map((j) => j.id))).toEqual({ tank: 2, healer: 2, dps: 5 });
     for (const j of JOBS) expect(j.skills).toHaveLength(SKILL_COUNT);
     for (const j of JOBS) expect(skillAt(j, SPRINT_SLOT)?.name).toBe('疾走');
     for (const j of JOBS) expect(skillAt(j, LB_SLOT)).toBeNull();
@@ -26,7 +26,9 @@ describe('party', () => {
     expect(hpScale(['guardian', 'priest', 'brawler', 'ranger'])).toBeCloseTo(1);
     expect(hpScale(['guardian', 'priest', 'brawler'])).toBeCloseTo(2.2 / 3.2);
     expect(hpScale(['guardian', 'brawler', 'ranger'])).toBeCloseTo(2.65 / 3.2);
-    expect(hpScale(['guardian', 'berserker', 'priest', 'warden', 'brawler', 'lancer', 'ranger', 'sorcerer'])).toBeCloseTo(2);
+    expect(hpScale(['guardian', 'berserker', 'priest', 'warden', 'brawler', 'lancer', 'ranger', 'sorcerer'])).toBeCloseTo(6.65 / 3.2);
+    // a second healer counts 0.8: 1 tank, 2 healers, 2 DPS is 125%, not 117%
+    expect(hpScale(['guardian', 'priest', 'warden', 'brawler', 'ranger'])).toBeCloseTo(4 / 3.2);
     expect(hpScale(['sorcerer'])).toBeCloseTo(1 / 3.2);
   });
 

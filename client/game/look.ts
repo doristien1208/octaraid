@@ -6,9 +6,10 @@ import type { BaseModel, Recolor } from './assets';
  * the colours swapped in its texture, the weapons in its hands, the code-built extras and the animation
  * clips its skills play. Colours follow the job table: guardian blue and silver, berserker crimson and
  * black, priest white and gold, warden deep blue and violet, brawler orange and white, lancer teal and
- * silver, ranger green and brown, sorcerer crimson and black.
+ * silver, ranger green and brown, sorcerer crimson and black, summoner emerald and gold (with a spirit
+ * floating beside them).
  */
-export type Extra = 'plume' | 'wings' | 'spear' | 'halo' | 'sunDisc' | 'crown' | 'orbs' | 'runes' | 'headband' | 'fists' | 'cap';
+export type Extra = 'plume' | 'wings' | 'spear' | 'halo' | 'sunDisc' | 'crown' | 'orbs' | 'runes' | 'headband' | 'fists' | 'cap' | 'spirit';
 
 export interface Prop {
   name: string;
@@ -232,6 +233,32 @@ export const LOOKS: Readonly<Record<JobId, Look>> = {
       'Use_Item',
       'Ranged_Magic_Shoot',
       'Ranged_Magic_Summon',
+      'Ranged_Magic_Shoot',
+    ],
+    cast: 'Ranged_Magic_Spellcasting',
+  },
+  // 喚靈術士 (v0.6): the hooded figure in emerald and gold with a book; its spirit and its dragon are built in code
+  summoner: {
+    base: 'rogue_hooded',
+    hide: [],
+    rules: [
+      { h: GREEN, s: 0.4, to: '#1f9d74', ref: 0.26 },
+      { h: LIME, s: 0.4, to: '#d9b44a', ref: 0.58 },
+    ],
+    props: [{ name: 'spellbook_open', bone: 'handslotl', rules: [{ h: MAGENTA, s: 0.5, to: '#1f7a5c', ref: 0.37 }] }],
+    extras: ['spirit'],
+    idle: 'Idle_A',
+    run: 'Running_A',
+    skills: [
+      ['Ranged_Magic_Shoot', 'Ranged_Magic_Shoot', 'Ranged_Magic_Shoot'],
+      'Ranged_Magic_Shoot',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Summon',
+      'Ranged_Magic_Raise',
+      'Ranged_Magic_Raise',
+      'Use_Item',
+      'Use_Item',
       'Ranged_Magic_Shoot',
     ],
     cast: 'Ranged_Magic_Spellcasting',

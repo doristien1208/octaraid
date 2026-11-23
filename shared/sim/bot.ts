@@ -2,7 +2,7 @@ import { RULES, TICK_MS, TICK_RATE, sec } from '../constants';
 import { SPRINT_SLOT, type JobId } from '../jobs';
 import { STATUS } from '../status';
 import { angleDiff, clampToArena, reach, sideOf } from './arena';
-import type { Tele } from './boss';
+import { sheltered, type Tele } from './boss';
 import type { Fight, Fighter, Foe } from './fight';
 import { hidden, inside, type Pillar, type Shape } from './mech';
 
@@ -140,9 +140,11 @@ export class Bot {
     const live = f.foes.filter((e) => f.hittable(e) && !(e.minHp !== undefined && e.hp <= e.minHp));
     if (!live.length) return null;
     const prison = live.find((e) => e.kind === 'prison');
-    // everyone free breaks a prison; tanks only when nobody else can
+    // everyone free breaks a prison; tanks only when nobody else can. With a knockback coming the rock
+    // stays up until it is over: the party hides behind it (崩岩巨像 Hard)
     const helpers = f.living().filter((q) => q.role !== 'tank' && q.id !== prison?.owner).length;
-    if (prison && (me.role !== 'tank' || !helpers)) return prison;
+    const pushing = !!prison && !!f.brain?.hazards().some((h) => h.shape.k === 'push' && h.end >= f.tick);
+    if (prison && !pushing && (me.role !== 'tank' || !helpers)) return prison;
     const bosses = live.filter((e) => e.boss);
     if (bosses.length) {
       const main = bosses.find((e) => e === f.brain?.foe) ?? bosses[0]!;
@@ -255,6 +257,9 @@ export class Bot {
     const towers = hz.filter((h) => h.shape.k === 'tower').sort((a, b) => a.id - b.id);
     const los = hz.find((h) => h.shape.k === 'los');
     const knock = hz.find((h) => h.shape.k === 'push');
+    // prison rocks still standing stop a knockback for whoever is right behind them
+    const rocks = knock ? f.foes.filter((e) => e.kind === 'prison' && e.hp > 0 && !e.gone) : [];
+    const shelter = (x: number, z: number) => !!knock && knock.shape.k === 'push' && rocks.some((r) => sheltered(knock.shape as { x: number; z: number }, r, x, z));
     const aimed = hz.filter((h) => !!h.aim && (h.shape.k === 'cone' || h.shape.k === 'rect'));
     const areas = hz.filter((h) => !h.aim && !h.on && AREA.has(h.shape.k));
     const donut = areas.find((h) => h.shape.k === 'donut');
@@ -297,8 +302,17 @@ export class Bot {
         }
         want(at(bestA, size), 12);
       } else {
+        // strips from the boss through each number: whoever the walking boss follows stays put (moving would
+        // drag the boss and swing every strip), the rest spread round it at even angles from that player
         const n = nums.length;
-        want(at(((myNum.h.shape.n - 1) * 2 * Math.PI) / Math.max(1, n), Math.min(9, size * 0.5)), 10);
+        const holder = boss.speed > 0 ? f.topOf(boss) : null;
+        if (holder?.id === me.id) want(base, 10);
+        else {
+          const from = holder ? Math.atan2(holder.x - ax, holder.z - az) : 0;
+          const rest = nums.filter((x) => x.q.id !== holder?.id).sort((a, b) => (a.h.shape.k === 'num' && b.h.shape.k === 'num' ? a.h.shape.n - b.h.shape.n : 0));
+          const j = rest.findIndex((x) => x.q.id === me.id) + (holder && nums.some((x) => x.q.id === holder.id) ? 1 : 0);
+          want(atHome(from + (j * 2 * Math.PI) / Math.max(1, n), Math.min(9, size * 0.5)), 10);
+        }
       }
     }
     let stackOn: Fighter | null = null;
@@ -367,6 +381,14 @@ export class Bot {
       const spot = this.pillarSpot(me, los, living);
       if (spot) want(spot, 16);
     }
+    if (knock && knock.shape.k === 'push' && rocks.length && brain.script.edge === 'cliff') {
+      // a knockback off the cliff with a prison rock up: in a line right behind the rock, away from the boss
+      const rock = rocks.reduce((a, b) => (Math.hypot(b.x - me.x, b.z - me.z) < Math.hypot(a.x - me.x, a.z - me.z) ? b : a));
+      const d = Math.hypot(rock.x - knock.shape.x, rock.z - knock.shape.z) || 1;
+      const order = living.filter((q) => !q.statuses.some((x) => x.id === 'stun')).map((q) => q.id).sort();
+      const dist = rock.r + 1 + Math.max(0, order.indexOf(me.id)) * 0.9;
+      want(clampToArena(f.enc.arena, rock.x + ((rock.x - knock.shape.x) / d) * dist, rock.z + ((rock.z - knock.shape.z) / d) * dist), 15);
+    }
 
     const cands: [number, number][] = [pref, [me.x, me.z], base];
     for (let r = 2; r < size + 3; r += 2) for (let k = 0; k < 16; k++) cands.push(at((k / 16) * Math.PI * 2 + r * 0.13, r));
@@ -383,18 +405,49 @@ export class Bot {
       for (let row = 0; row < grid; row++) for (let col = 0; col < grid; col++) cands.push([-size + cell * (col + 0.5), -size + cell * (row + 0.5)]);
     }
     const soon = Math.min(...hz.filter((h) => !h.zone).map((h) => h.end - t), 99 * TICK_RATE) / TICK_RATE;
+    // in something that goes off later: fine if there is still time to walk out of it from there (the
+    // second half of 炎冰交錯 needs the middle, not the far edge)
+    const escapable = (h: Tele, x: number, z: number): boolean => {
+      const reach = RULES.moveSpeed * Math.max(0, (h.end - t) / TICK_RATE - 0.6);
+      for (const r of [reach * 0.5, reach]) {
+        for (let k = 0; k < 8; k++) {
+          const [ex, ez] = clampToArena(f.enc.arena, x + Math.sin((k * Math.PI) / 4) * r, z + Math.cos((k * Math.PI) / 4) * r);
+          if (!near(h.shape, ex, ez)) return true;
+        }
+      }
+      return false;
+    };
+    // the way there: a spot that is safe but past something going off just as I would walk through it
+    // (not something I already stand in: any way out crosses that one)
+    const crossing = [...areas, ...aimed.filter((h) => h.aim !== me.id)].filter((h) => !h.zone && h.end >= t && !inside(h.shape, me.x, me.z));
+    const pathCost = (x: number, z: number): number => {
+      const d = Math.hypot(x - me.x, z - me.z);
+      if (d < 1.5 || !crossing.length) return 0;
+      for (let k = 1; k <= 4; k++) {
+        const px = me.x + ((x - me.x) * k) / 5;
+        const pz = me.z + ((z - me.z) * k) / 5;
+        const arrive = t + (((d * k) / 5) / RULES.moveSpeed) * TICK_RATE;
+        if (crossing.some((h) => Math.abs(h.end - arrive) < TICK_RATE * 0.8 && inside(h.shape, px, pz))) return 700;
+      }
+      return 0;
+    };
     // standing in something: the quickest way out first, where the role wants to be second
     const travel = this.inDanger(me) ? 10 : 0.5;
+    // when the stack I joined goes off, and how big it is
+    const joined = stacks.find((x) => x.q === stackOn);
+    const stackHit = joined ? joined.h.end : null;
+    const stackR = joined && joined.h.shape.k === 'circle' ? joined.h.shape.r : 4;
     let best = pref;
     let bestCost = Infinity;
     for (const c of cands) {
       const [x, z] = clampToArena(f.enc.arena, c[0], c[1]);
       let cost = Math.hypot(x - pref[0], z - pref[1]) * (stackOn ? 12 : weight);
       cost += Math.hypot(x - me.x, z - me.z) * travel;
+      if (cost < bestCost) cost += pathCost(x, z);
       if (Math.hypot(x - me.x, z - me.z) / RULES.moveSpeed > soon + 0.2) cost += 150;
       for (const h of areas) {
         if (cost >= bestCost) break;
-        if (near(h.shape, x, z)) cost += h.zone ? 600 : h.end - t <= URGENT ? 1000 : 250;
+        if (near(h.shape, x, z)) cost += h.zone ? 600 : h.end - t <= URGENT ? 1000 : escapable(h, x, z) ? 150 : 900;
       }
       for (const h of aimed) {
         if (h.aim === me.id || cost >= bestCost) continue;
@@ -403,7 +456,9 @@ export class Bot {
       if (los && los.shape.k === 'los' && !hiddenWell(los.shape, x, z)) cost += los.end - t <= URGENT + TICK_RATE ? 1200 : 300;
       if (knock && knock.shape.k === 'push' && brain.script.edge === 'cliff') {
         const max = size - RULES.playerRadius - knock.shape.dist - 1;
-        if (Math.hypot(x - knock.shape.x, z - knock.shape.z) > max) cost += 1000;
+        const out = Math.hypot(x - knock.shape.x, z - knock.shape.z) - max;
+        // too far out to come back in time: a must; with time to spare, other things come first (falling rocks)
+        if (out > 0 && !shelter(x, z)) cost += (out / RULES.moveSpeed + 1.5) * TICK_RATE >= knock.end - t ? 1000 : 80;
       }
       for (const s of [...spreads, ...drills]) {
         const r = s.h.shape.k === 'circle' ? s.h.shape.r : 5;
@@ -424,6 +479,10 @@ export class Bot {
         if (Math.hypot(x - s.q.x, z - s.q.z) <= r + 1) cost += 600; // a stack that is not mine
       }
       for (const h of towers) if (h !== myTower && inside(h.shape, x, z)) cost += 150;
+      // my tower about to go off: being in it is a must (an empty tower hurts everyone)
+      if (myTower && myTower.end - t <= URGENT && !inside(myTower.shape, x, z)) cost += 900;
+      // the same for the stack I am meant to share: a stack short of people hurts whoever holds it
+      if (stackOn && stackHit !== null && stackHit - t <= URGENT && Math.hypot(x - stackOn.x, z - stackOn.z) > stackR - 0.5) cost += 900;
       if (myTether && myTether.shape.k === 'tether') {
         const other = f.players.get(myTether.shape.a === me.id ? myTether.shape.b : myTether.shape.a);
         if (other && Math.hypot(x - other.x, z - other.z) < myTether.shape.dist + 1.5) cost += 600;
@@ -467,7 +526,17 @@ export class Bot {
       }
       const left = towers.map((tw) => (tw.shape.k === 'tower' ? tw.shape.need : 1));
       const pos = (tw: Tele) => (tw.shape.k === 'tower' ? tw.shape : { x: 0, z: 0 });
-      const cost = (q: Fighter, j: number) => Math.hypot(pos(towers[j]!).x - q.x, pos(towers[j]!).z - q.z) + (q.role === 'tank' ? 15 : 0);
+      // a bomb going off near the time of a tower: its holder would blow up the people in it (冰封印記)
+      const bombAt = new Map<string, number>();
+      for (const h of this.fight.brain!.hazards()) {
+        const q = h.shape.k === 'bomb' ? this.fight.brain!.holder(h) : undefined;
+        if (q) bombAt.set(q.id, h.end);
+      }
+      const bomb = (q: Fighter, j: number) => {
+        const at = bombAt.get(q.id);
+        return at !== undefined && Math.abs(at - towers[j]!.end) < sec(4) ? 60 : 0;
+      };
+      const cost = (q: Fighter, j: number) => Math.hypot(pos(towers[j]!).x - q.x, pos(towers[j]!).z - q.z) + (q.role === 'tank' ? 15 : 0) + bomb(q, j);
       const take = (q: Fighter, not = -1): void => {
         const order = towers.map((_, j) => j).filter((j) => j !== not && left[j]! > 0);
         if (!order.length) return;
@@ -518,14 +587,41 @@ export class Bot {
     let plan = plans.get(tele.id);
     if (!plan) {
       const n = living.length;
-      const use = f.hard ? Math.max(1, Math.min(pillars.length, Math.ceil(n / 4))) : pillars.length;
+      // tethers ending as it hits (零度連鎖): the two ends behind pillars far apart
+      const ties = f.brain!.hazards().filter((h) => h.shape.k === 'tether' && Math.abs(h.end - tele.end) <= sec(3));
+      const use = f.hard ? Math.max(ties.length ? 2 : 1, Math.min(pillars.length, Math.ceil(n / 4))) : pillars.length;
       const cap = Math.ceil(n / use);
       const cx = living.reduce((sum, q) => sum + q.x, 0) / Math.max(1, n);
       const cz = living.reduce((sum, q) => sum + q.z, 0) / Math.max(1, n);
-      const chosen = [...pillars].sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz)).slice(0, use);
-      // the closest player–pillar pairs first, while the pillar has room
+      let chosen = [...pillars].sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz)).slice(0, use);
       const load = chosen.map(() => 0);
       const slots = new Map<string, [number, number]>();
+      if (ties.length && pillars.length >= 2) {
+        // the two pillars furthest apart; each tether's ends one behind each
+        let pair: [Pillar, Pillar] = [pillars[0]!, pillars[1]!];
+        for (const a of pillars) for (const b of pillars) if (Math.hypot(a.x - b.x, a.z - b.z) > Math.hypot(pair[0].x - pair[1].x, pair[0].z - pair[1].z)) pair = [a, b];
+        chosen = [pair[0], pair[1], ...chosen.filter((p) => p !== pair[0] && p !== pair[1])].slice(0, Math.max(2, use));
+        load.length = 0;
+        for (let k = 0; k < chosen.length; k++) load.push(0);
+        const byId = new Map(living.map((q) => [q.id, q]));
+        const d = (id: string, j: number) => {
+          const q = byId.get(id);
+          return q ? Math.hypot(chosen[j]!.x - q.x, chosen[j]!.z - q.z) : 0;
+        };
+        for (const h of ties) {
+          if (h.shape.k !== 'tether') continue;
+          // whichever way round means less walking, as long as both pillars have room
+          const { a, b } = h.shape;
+          let flip = d(a, 1) + d(b, 0) < d(a, 0) + d(b, 1);
+          if (load[flip ? 1 : 0]! >= cap || load[flip ? 0 : 1]! >= cap) flip = !flip;
+          for (const [id, j] of [[a, flip ? 1 : 0], [b, flip ? 0 : 1]] as const) {
+            if (slots.has(id) || !byId.has(id)) continue;
+            slots.set(id, [j, load[j]!]);
+            load[j]!++;
+          }
+        }
+      }
+      // the closest player–pillar pairs first, while the pillar has room
       const pairs = living.flatMap((q) => chosen.map((p, j) => ({ q, j, d: Math.hypot(p.x - q.x, p.z - q.z) })));
       pairs.sort((a, b) => a.d - b.d || a.q.id.localeCompare(b.q.id) || a.j - b.j);
       for (const { q, j } of pairs) {
@@ -677,6 +773,11 @@ export class Bot {
         return false;
       }
       if (fallen && ready(4)) return use(4, fallen.id);
+      // a raid-wide on its way (on Hard it hits twice): everyone full first
+      if (raidwide && pct(lowest) < 0.97) {
+        if (priest && alive.filter((q) => pct(q) < 0.97).length >= 2) return use(8, null);
+        return use(1, lowest.id);
+      }
       if (busted && pct(busted) < 0.98) return use(1, busted.id);
       if (!priest && raidwide && ready(2)) return use(2, null);
       if (avg < 0.8 && ready(2)) return use(2, null);
@@ -744,6 +845,27 @@ export class Bot {
         if (ready(1)) return use(1);
         return use(0);
       }
+      case 'summoner': {
+        // 0 靈光彈, 1 靈光爆, 2 岩靈召喚, 3 炎靈召喚, 4 星龍降臨, 5 靈光閃耀, 6 喚魂術, 7 靈盾, 8 迅唱, 9 蝕力咒
+        const quick = me.statuses.some((s) => s.id === 'swift' || s.id === 'stoneSpirit');
+        // raise someone the healers cannot get to (none alive, or none free)
+        const healers = [...f.players.values()].filter((q) => q.role === 'healer' && !q.dead);
+        const fallen = [...f.players.values()].find((q) => q.dead && reach(me.x, me.z, { x: q.x, z: q.z, r: RULES.playerRadius }) <= 30);
+        const mustRaise = !!fallen && (!healers.length || healers.every((q) => q.cast !== null));
+        if ((raidwide || low) && weave && ready(7) && use(7, null)) return false;
+        if (raidwide && weave && ready(9) && !boss.statuses.some((s) => s.id === 'addle' || s.id === 'feint') && reach(me.x, me.z, boss) <= 25 && use(9, boss.id)) return false;
+        if (mustRaise && ready(6) && !quick && weave && ready(8) && use(8, null)) return false;
+        if (weave && ready(4) && use(4)) return false;
+        if (weave && ready(5) && use(5, null)) return false;
+        if (weave && ready(3) && use(3, null)) return false;
+        // 岩靈 whenever it is up (its shield helps); its instants carry me through the moving
+        if (weave && ready(2) && use(2, null)) return false;
+        if (gcdLeft > 0) return false;
+        if (mustRaise && ready(6) && (quick || settled)) return use(6, fallen!.id);
+        if (!settled && !quick) return false;
+        if (near(5) >= 3) return use(1);
+        return use(0);
+      }
       default:
         return false;
     }
@@ -792,6 +914,8 @@ export function spotFor(job: JobId, k: number): Spot {
       return [0.9 + k * 0.35, 8, false];
     case 'sorcerer':
       return [-0.9 - k * 0.35, 8, false];
+    case 'summoner':
+      return [-1.35 - k * 0.35, 8, false];
     case 'priest':
       return [0.45 + k * 0.3, 7, false];
     case 'warden':
