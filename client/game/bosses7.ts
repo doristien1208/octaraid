@@ -99,7 +99,7 @@ class Ripple {
  * FoeBase can still sink `body` when the foe is gone; walking is read from how far the engine moved the root
  * since the last frame; act('jump') starts a leap; `age` counts from when it appeared (they rise into view).
  */
-abstract class Figure extends FoeBase {
+export abstract class Figure extends FoeBase {
   protected readonly rig = new THREE.Group();
   /** 0 standing … 1 walking, eased */
   protected stride = 0;

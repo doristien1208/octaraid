@@ -946,6 +946,15 @@ export class Fight {
     return this.rng.next();
   }
 
+  /** Where the random sequence stands, and back to it: the boss engine draws a foreseen mechanic twice the same. */
+  rngState(): number {
+    return this.rng.state;
+  }
+
+  setRngState(s: number): void {
+    this.rng.state = s;
+  }
+
   /** Adds a new enemy; it starts with the tanks on top of its list. */
   spawnFoe(kind: FoeKind, x: number, z: number, hp: number, opts: { id?: string; auto?: number; owner?: string } = {}): Foe {
     const info = FOES[kind];
@@ -1050,7 +1059,7 @@ export class Fight {
     q.diedAt = this.tick;
     q.stats.deaths++;
     q.diedWeak = q.statuses.some((s) => s.id === 'weak' || s.id === 'brink') ? 1 : 0;
-    q.statuses = q.statuses.filter((s) => s.id === 'echo');
+    q.statuses = q.statuses.filter((s) => s.id === 'echo' || s.id === 'timeKey');
     if (this.lbBy === q.id) this.lbBy = null;
     q.cast = null;
     q.queued = null;
@@ -1063,7 +1072,7 @@ export class Fight {
   private raise(q: Fighter, by: string | null, how: 'skill' | 'lb' | 'auto'): void {
     if (!q.dead) return;
     q.dead = false;
-    q.statuses = q.statuses.filter((s) => s.id === 'echo');
+    q.statuses = q.statuses.filter((s) => s.id === 'echo' || s.id === 'timeKey');
     if (how !== 'lb') q.statuses.push({ id: q.diedWeak ? 'brink' : 'weak', src: by ?? q.id, until: this.tick + RULES.weakness, v: 0 });
     q.statuses.push({ id: 'risen', src: by ?? q.id, until: this.tick + RULES.risen, v: 0 });
     q.hp = how === 'lb' ? this.maxHp(q) : Math.round(this.maxHp(q) * RULES.raiseHp);
@@ -1366,6 +1375,12 @@ export class Fight {
           break;
         case 'stop':
           shape = ['x'];
+          break;
+        case 'go':
+          shape = ['v'];
+          break;
+        case 'path':
+          shape = ['a', r2(s.x0), r2(s.z0), r2(s.x1), r2(s.z1)];
           break;
         case 'mark':
           shape = ['m'];

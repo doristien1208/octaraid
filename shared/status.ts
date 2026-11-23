@@ -78,7 +78,18 @@ export type StatusId =
   | 'bolt'
   | 'waterDown'
   | 'boltDown'
-  | 'plasma';
+  | 'plasma'
+  // v0.8: 時間停止, P3, P4
+  | 'timeKey'
+  | 'bound'
+  | 'apart'
+  | 'heavy'
+  | 'sphere'
+  | 'warp'
+  | 'lightPull'
+  | 'darkPush'
+  | 'jailed'
+  | 'gilded';
 
 export interface StatusInfo {
   name: string;
@@ -222,6 +233,17 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   waterDown: { name: '水抗降低', icon: '濕', good: false, desc: '吃過流體揮擊或壓縮水：這段時間再吃流體揮擊就倒地，壓縮水也不會再傳給你' },
   boltDown: { name: '雷抗降低', icon: '麻', good: false, desc: '已經拿過壓縮雷：不會再傳給你' },
   plasma: { name: '電漿護盾', icon: '盾', good: true, desc: '只吃正面的攻擊：打破之前其他方向的傷害都無效' },
+  // v0.8 (new ones go at the end: snapshots send the index)
+  timeKey: { name: '時之鑰', icon: '鑰', good: true, desc: '時之鳥碰過所有審判晶石：P4 的未來視看得到（倒地也不會消失）' },
+  bound: { name: '拘束', icon: '拘', good: false, desc: '時間停止時要和另一個拘束的人站在 5 m 內，否則兩人都倒地' },
+  apart: { name: '隔離', icon: '隔', good: false, desc: '時間停止時要和另一個隔離的人相距 25 m 以上，否則兩人都倒地' },
+  heavy: { name: '加重', icon: '重', good: false, desc: '這段時間受到任何傷害都會倒地：別讓熾核、凍核的攻擊打到', taken: 20 },
+  sphere: { name: '電漿球', icon: '球', good: false, desc: '時間到在身邊爆炸並留下重力地面：和另一顆離遠一點，地面重疊就滅團' },
+  warp: { name: '時隙', icon: '隙', good: false, desc: '踩過時隙：這段時間再踩一次就倒地' },
+  lightPull: { name: '光之引導', icon: '光', good: false, desc: '時間到會被往光之信標拉 10 m：先站好，被拉完要落在安全處' },
+  darkPush: { name: '暗之驅逐', icon: '暗', good: false, desc: '時間到會被暗之信標推開 10 m：先站好，被推完要落在安全處' },
+  jailed: { name: '時間牢獄', icon: '牢', good: false, desc: '接過一個牢籠：不能再接' },
+  gilded: { name: '金色', icon: '金', good: true, desc: '碰到的審判晶石（全部碰到就變成時之鑰）' },
 };
 
 export const STATUS_IDS = Object.keys(STATUS) as StatusId[];

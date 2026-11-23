@@ -2070,6 +2070,24 @@ p {
   animation: pop 0.3s ease-out;
 }
 
+/* 行動命令 (v0.8): keep moving */
+.hud-freeze.move {
+  color: #8dff7a;
+}
+
+/* 時隙陣's numbers and rifts, 時之鳥's way */
+.tele-label.c {
+  color: #6ff6ff;
+}
+
+.tele-label.c.num {
+  color: #6ff6ff;
+}
+
+.tele-label.w {
+  color: #fff6d8;
+}
+
 .tele-label.num {
   font-size: 22px;
   padding: 2px 12px;

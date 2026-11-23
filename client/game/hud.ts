@@ -374,10 +374,13 @@ export class Hud {
     this.castKinds.set(id, m);
   }
 
-  /** The freeze check (深度凍結): a warning in the middle of the screen until it ends (ms left, or null). */
-  freeze(left: number | null): void {
-    this.freezeWarn.classList.toggle('show', left !== null);
-    if (left !== null) this.freezeWarn.textContent = left > 1500 ? `讀條結束時不要移動 ${(left / 1000).toFixed(1)}` : `停！ ${(left / 1000).toFixed(1)}`;
+  /** The freeze check (深度凍結, 靜止命令) or 行動命令: a warning in the middle of the screen until it ends. */
+  freeze(order: { left: number; move: boolean } | null): void {
+    this.freezeWarn.classList.toggle('show', order !== null);
+    this.freezeWarn.classList.toggle('move', !!order?.move);
+    if (!order) return;
+    const secs = (order.left / 1000).toFixed(1);
+    this.freezeWarn.textContent = order.move ? (order.left > 1500 ? `讀條結束時要在移動 ${secs}` : `動！ ${secs}`) : order.left > 1500 ? `讀條結束時不要移動 ${secs}` : `停！ ${secs}`;
   }
 
   /** A line over the LB gauge for a moment (a mechanic done without a mistake). */

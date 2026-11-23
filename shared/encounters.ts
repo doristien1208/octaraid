@@ -112,12 +112,13 @@ export const ENCOUNTERS: readonly Encounter[] = [
     boss: '水銀核心、熾核與凍核',
     arena: { shape: 'circle', size: 22 },
     learn: '多王接力、血量平衡、碰觸傳遞、數字點名',
-    desc: '發條城塞的頂層。王一組接一組上場，每個階段有自己的狂暴；滅團就從頭來。v0.7 開放 P1、數字裁斷與 P2。',
-    // each stage has its own enrage (P1 2:45, P2 3:15 after the 35 s of 數字裁斷): the most a fight can last
-    times: { normal: { target: 330, enrage: 395 }, hard: { target: 330, enrage: 395 } },
-    hp: { normal: 1_150_000, hard: 1_150_000 },
+    desc: '發條城塞的頂層。王一組接一組上場，每個階段有自己的狂暴；滅團就從頭來。四個階段加兩段轉場，約 13 分鐘。',
+    // each stage has its own enrage (P1 2:45, P2 3:15, P3 3:20, P4 3:50, with 數字裁斷 32 s and 時間停止 14 s
+    // between): the most a fight can last
+    times: { normal: { target: 780, enrage: 836 }, hard: { target: 780, enrage: 836 } },
+    hp: { normal: 2_530_000, hard: 2_530_000 },
     theme: { sky: '#1f1b2e', floor: '#5d5246', floorLine: '#c9a45c', edge: '#2f2820', outside: '#14111c' },
-    stages: ['P1：水銀核心', '數字裁斷', 'P2：熾核與凍核'],
+    stages: ['P1：水銀核心', '數字裁斷', 'P2：熾核與凍核', '時間停止', 'P3：時律機神', 'P4：時律機神・終式'],
   },
 ];
 

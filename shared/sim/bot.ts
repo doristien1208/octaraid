@@ -2,7 +2,7 @@ import { RULES, TICK_MS, TICK_RATE, sec } from '../constants';
 import { SPRINT_SLOT, type JobId } from '../jobs';
 import { STATUS } from '../status';
 import { angleDiff, clampToArena, reach, sideOf } from './arena';
-import { sheltered, type Tele } from './boss';
+import { beaconMove, sheltered, type Tele } from './boss';
 import type { Fight, Fighter, Foe } from './fight';
 import { hidden, inside, type Pillar, type Shape } from './mech';
 
@@ -101,6 +101,13 @@ export class Bot {
     const goal = this.goal(me, focus);
     // a freeze check about to end: stand still, whatever else is going on
     const freeze = !!f.brain?.hazards().some((h) => h.shape.k === 'stop' && h.end >= f.tick && h.end - f.tick <= sec(0.5));
+    // 行動命令 about to end: keep moving (a little circle where I stand), whatever else is going on
+    const moveOrder = !freeze && !!f.brain?.hazards().some((h) => h.shape.k === 'go' && h.end >= f.tick && h.end - f.tick <= sec(0.7));
+    if (moveOrder && !me.dash) {
+      const a = (f.tick / TICK_RATE) * 5;
+      this.walk(me, [goal[0] + Math.sin(a) * 1.2, goal[1] + Math.cos(a) * 1.2]);
+      return;
+    }
     // something lands soon and I am not where I should be: move now, even out of a cast
     const urgent = !freeze && this.urgent(me, goal);
     const still = f.phase === 'fight' && focus && !urgent ? this.act(me, focus, goal) : false;
@@ -288,7 +295,7 @@ export class Bot {
     const boss = brain.foe;
     // 超級跳躍 shows nothing on the ground: the cast is the cue; 判決傳遞 has nothing on the ground either
     const jumping = boss.cast?.name === '超級跳躍';
-    if (!hz.length && !jumping && !f.living().some((q) => markOf(q))) return base;
+    if (!hz.length && !jumping && !brain.staged && !f.living().some((q) => markOf(q))) return base;
     const size = f.enc.arena.size;
     const at = (a: number, r: number): [number, number] => clampToArena(f.enc.arena, boss.x + Math.sin(a) * r, boss.z + Math.cos(a) * r);
     // slots for spreads, stacks and tethers are kept round where the boss is meant to be, not where it is
@@ -311,14 +318,17 @@ export class Bot {
     const bombs = held((h) => h.shape.k === 'bomb' && h.end - t <= BOMB_AHEAD);
     const nums = held((h) => h.shape.k === 'num');
     const tethers = hz.filter((h) => h.shape.k === 'tether').sort((a, b) => a.id - b.id);
-    const towers = hz.filter((h) => h.shape.k === 'tower').sort((a, b) => a.id - b.id);
+    const towers = hz.filter((h) => h.shape.k === 'tower' && !h.cage).sort((a, b) => a.id - b.id);
     const los = hz.find((h) => h.shape.k === 'los');
     const knock = hz.find((h) => h.shape.k === 'push');
     // prison rocks still standing stop a knockback for whoever is right behind them
     const rocks = knock ? f.foes.filter((e) => e.kind === 'prison' && e.hp > 0 && !e.gone) : [];
     const shelter = (x: number, z: number) => !!knock && knock.shape.k === 'push' && rocks.some((r) => sheltered(knock.shape as { x: number; z: number }, r, x, z));
     const aimed = hz.filter((h) => !!h.aim && (h.shape.k === 'cone' || h.shape.k === 'rect'));
-    const areas = hz.filter((h) => !h.aim && !h.on && AREA.has(h.shape.k));
+    // 時隙陣: the rift for my number is where I am meant to be when my turn comes
+    const myStep = brain.hazards().find((h) => h.shape.k === 'num' && h.soak !== undefined && h.on === me.id);
+    const myRift = myStep ? brain.hazards().find((h) => h.shape.k === 'circle' && h.soak === myStep.soak) : undefined;
+    const areas = hz.filter((h) => !h.aim && !h.on && AREA.has(h.shape.k) && h !== myRift);
     const donut = areas.find((h) => h.shape.k === 'donut');
     const away = this.awayAngle(me, others);
 
@@ -452,7 +462,9 @@ export class Bot {
     if (plain.length && !stackOn) {
       const k = plain.findIndex((s) => s.q.id === me.id);
       const n = plain.length;
-      const slot = (j: number): [number, number] => (n === 1 ? (donut ? at(0, 4) : base) : atHome(Math.PI / 2 + (j * 2 * Math.PI) / n, donut ? 5 : 9));
+      // one stack for everyone in the ultimate: where the party already is, so nobody has far to go
+      const mid: [number, number] = [living.reduce((n2, q) => n2 + q.x, 0) / living.length, living.reduce((n2, q) => n2 + q.z, 0) / living.length];
+      const slot = (j: number): [number, number] => (n === 1 ? (donut ? at(0, 4) : brain.staged ? mid : base) : atHome(Math.PI / 2 + (j * 2 * Math.PI) / n, donut ? 5 : 9));
       if (k >= 0) want(slot(k), 6);
       else {
         // the others split between the stacks, nearest first, as evenly as the stacks want
@@ -484,6 +496,20 @@ export class Bot {
     }
     const myTower = this.towerFor(me, towers, living);
     if (myTower && myTower.shape.k === 'tower') want([myTower.shape.x, myTower.shape.z], 14);
+    // 時間停止: where 拘束, 加重 and the rest stand so that the images strike the right people
+    const stasis = this.stasisSpot(me, living);
+    if (stasis) want(stasis, 18);
+    // 起源陣: a crystal on 時之鳥's way (not too close to the boss, not on top of another)
+    const crystal = this.crystalSpot(me, living);
+    if (crystal) want(crystal, 16);
+    // 時隙陣: into my rift when my turn comes
+    if (myRift && myRift.shape.k === 'circle' && myRift.end - t <= sec(4)) want([myRift.shape.x, myRift.shape.z], 20);
+    // 時間牢獄: my cage, in turn
+    const cage = this.cageFor(me, living);
+    if (cage && cage.shape.k === 'tower' && cage.end - t <= sec(4)) want([cage.shape.x, cage.shape.z], 18);
+    // 終焉之言: stand where the pull (or the push) lands me in the safe ring
+    const beacon = this.beaconSpot(me, living);
+    if (beacon) want(beacon, 18);
     // 超級跳躍: the tank takes it to the edge square to 凍核's line, so the beam runs across the middle and
     // past 凍核; the rest wait on 凍核's side of it (melee still on 凍核)
     if (jumping) {
@@ -616,6 +642,11 @@ export class Bot {
         if (Math.hypot(x - s.q.x, z - s.q.z) <= r + 1) cost += 600; // a stack that is not mine
       }
       for (const h of towers) if (h !== myTower && inside(h.shape, x, z)) cost += 150;
+      if (myRift && myRift.shape.k === 'circle' && myRift.end - t <= URGENT && Math.hypot(x - myRift.shape.x, z - myRift.shape.z) > myRift.shape.r - 0.6) cost += 1500;
+      if (cage && cage.end - t <= URGENT && !inside(cage.shape, x, z)) cost += 900;
+      if (!me.statuses.some((s) => s.id === 'jailed')) {
+        for (const h of hz) if (h.cage && h !== cage && h.end - t <= URGENT + TICK_RATE && inside(h.shape, x, z)) cost += 700;
+      }
       if (marking) {
         // touching passes a mark on (and α touching β takes both down): only the planned pass
         for (const q of others) {
@@ -663,6 +694,119 @@ export class Bot {
     const passTo = mine && decreeOf(me) !== mine ? (others.find((q) => decreeOf(q) === mine && free(q)) ?? null) : null;
     const passFrom = decreeOf(me) && free(me) ? (others.find((q) => markOf(q) === decreeOf(me) && decreeOf(q) !== markOf(q)) ?? null) : null;
     return { marking, mine, passTo, passFrom };
+  }
+
+  /**
+   * 時間停止: 加重 behind 熾核's image, far from 凍核's; two players right by 熾核 (they take both strikes:
+   * the tank first, and a 拘束 pair together there); the rest nearer 凍核, so 凍核's three nearest never
+   * include 加重 (a partner tied to 加重 stands with it). 隔離 (6 or more) go to opposite ends.
+   */
+  private stasisSpot(me: Fighter, living: Fighter[]): [number, number] | null {
+    const f = this.fight;
+    const has = (q: Fighter, id: string) => q.statuses.some((s) => s.id === id);
+    const heavy = living.find((q) => has(q, 'heavy'));
+    const ember = f.foes.find((e) => e.kind === 'ember' && e.untargetable && !e.gone);
+    const frost = f.foes.find((e) => e.kind === 'frost' && e.untargetable && !e.gone);
+    if (!heavy || !ember || !frost) return null;
+    const d = Math.hypot(frost.x - ember.x, frost.z - ember.z) || 1;
+    const [ux, uz] = [(frost.x - ember.x) / d, (frost.z - ember.z) / d];
+    // across the line between them, towards the middle of the arena
+    let [vx, vz] = [-uz, ux];
+    if (vx * -ember.x + vz * -ember.z < 0) [vx, vz] = [-vx, -vz];
+    const at = (from: Foe, a: number, b: number): [number, number] => clampToArena(f.enc.arena, from.x + ux * a + vx * b, from.z + uz * a + vz * b);
+    const spots = new Map<string, [number, number]>();
+    spots.set(heavy.id, at(ember, -8, 5));
+    const bound = living.filter((q) => has(q, 'bound'));
+    const apart = living.filter((q) => has(q, 'apart'));
+    if (bound.includes(heavy)) {
+      const partner = bound.find((q) => q !== heavy);
+      if (partner) spots.set(partner.id, at(ember, -5.5, 5));
+    }
+    if (apart.length === 2) {
+      spots.set(apart[0]!.id, at(ember, -4, -7));
+      spots.set(apart[1]!.id, at(frost, 6, 7));
+    }
+    const front = [at(ember, 3, 0), at(ember, 3, 2.5)];
+    const back = [at(frost, -4, 6), at(frost, -4, 9), at(frost, -1, 7.5), at(frost, -7, 7.5)];
+    // a 拘束 pair without 加重 stands by 熾核 together; then tanks, then the rest
+    const pair = bound.includes(heavy) ? [] : bound.filter((q) => !spots.has(q.id));
+    const rest = living.filter((q) => !spots.has(q.id) && !pair.includes(q)).sort((a, b) => (a.role === 'tank' ? 0 : 1) - (b.role === 'tank' ? 0 : 1) || a.id.localeCompare(b.id));
+    const free = [...front, ...back];
+    for (const q of [...pair, ...rest]) spots.set(q.id, free.shift() ?? at(frost, -4, 6));
+    return spots.get(me.id) ?? null;
+  }
+
+  /**
+   * 起源陣: the players without a 電漿球 drop their crystals on 時之鳥's way, evenly from the bird's end to
+   * well short of the boss (a crystal by the boss shatters), until they drop.
+   */
+  private crystalSpot(me: Fighter, living: Fighter[]): [number, number] | null {
+    const f = this.fight;
+    const brain = f.brain!;
+    const b = brain.bird;
+    if (!b) return null;
+    const path = brain.hazards().find((h) => h.shape.k === 'path');
+    if (!path || path.shape.k !== 'path') return null;
+    if (me.statuses.some((s) => s.id === 'sphere')) {
+      // a 電漿球 away from the bird's way (a tank brings the boss along: keep it off the crystals), the two
+      // far enough apart that their floors do not touch
+      const carriers = living.filter((q) => q.statuses.some((s) => s.id === 'sphere')).sort((a, c) => a.id.localeCompare(c.id));
+      const k = carriers.findIndex((q) => q.id === me.id);
+      const away = Math.atan2(path.shape.x1 - path.shape.x0, path.shape.z1 - path.shape.z0);
+      const a = away + (k === 0 ? -0.9 : 0.9);
+      return clampToArena(f.enc.arena, path.shape.x1 + Math.sin(a) * 10, path.shape.z1 + Math.cos(a) * 10);
+    }
+    if (b.crystals.length || b.total) return null;
+    const droppers = living.filter((q) => !q.statuses.some((s) => s.id === 'sphere')).sort((a, c) => a.id.localeCompare(c.id));
+    const k = droppers.findIndex((q) => q.id === me.id);
+    if (k < 0) return null;
+    const p = path.shape;
+    const len = Math.hypot(p.x1 - p.x0, p.z1 - p.z0) || 1;
+    // from 2 m after its start to 8 m short of the boss
+    const from = 2 / len;
+    const to = Math.max(from, 1 - 8 / len);
+    const frac = droppers.length > 1 ? from + ((to - from) * k) / (droppers.length - 1) : (from + to) / 2;
+    return [p.x0 + (p.x1 - p.x0) * frac, p.z0 + (p.z1 - p.z0) * frac];
+  }
+
+  /** 時間牢獄: the cages in turn to the healers, then the tanks, then the DPS, worked out once for the set. */
+  private cageFor(me: Fighter, living: Fighter[]): Tele | null {
+    if (me.statuses.some((s) => s.id === 'jailed')) return null;
+    const cages = this.fight.brain!.hazards().filter((h) => h.cage && h.end >= this.fight.tick).sort((a, b) => a.end - b.end || a.id - b.id);
+    if (!cages.length) return null;
+    const order = (q: Fighter) => (q.role === 'healer' ? 0 : q.role === 'tank' ? 1 : 2);
+    const fresh = living.filter((q) => !q.statuses.some((s) => s.id === 'jailed')).sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
+    const k = fresh.findIndex((q) => q.id === me.id);
+    return k >= 0 ? (cages[k] ?? null) : null;
+  }
+
+  /**
+   * 終焉之言: where to stand so that the pull to the light (or the push from the dark) lands me by the boss,
+   * inside the safe ring: back from my landing spot along the way I will be moved.
+   */
+  private beaconSpot(me: Fighter, living: Fighter[]): [number, number] | null {
+    const f = this.fight;
+    const pull = me.statuses.find((s) => s.id === 'lightPull');
+    const push = me.statuses.find((s) => s.id === 'darkPush');
+    if (!pull && !push) return null;
+    const light = f.foes.find((e) => e.kind === 'lightBeacon' && !e.gone);
+    const dark = f.foes.find((e) => e.kind === 'darkBeacon' && !e.gone);
+    if (!light || !dark) return null;
+    const boss = f.brain!.foe;
+    // a landing spot by the boss for each of us, side by side across the line between the beacons
+    const ids = living.map((q) => q.id).sort();
+    const rank = Math.max(0, ids.indexOf(me.id)) - (ids.length - 1) / 2;
+    const bd = Math.hypot(light.x - dark.x, light.z - dark.z) || 1;
+    const [ux, uz] = [(light.x - dark.x) / bd, (light.z - dark.z) / bd];
+    const land: [number, number] = [boss.x - uz * rank * 1.6, boss.z + ux * rank * 1.6];
+    // pulled: start 10 m from the landing, away from the light; pushed: 10 m from it, towards the dark
+    const dist = 10;
+    const [sx, sz] = [land[0] - ux * dist, land[1] - uz * dist];
+    const start = clampToArena(f.enc.arena, sx, sz);
+    // the walls may cut the way short: then stand where it still ends by the boss, if anywhere does
+    const [lx, lz] = beaconMove(start[0], start[1], !!pull, [light.x, light.z], [dark.x, dark.z], dist);
+    if (Math.hypot(lx - land[0], lz - land[1]) > 2.5) return [land[0] - ux * (dist - 2), land[1] - uz * (dist - 2)];
+    return start;
   }
 
   /** Players I must not touch right now (判決傳遞): anyone, while I hold a mark; anyone holding one, otherwise. */
@@ -834,8 +978,9 @@ export class Bot {
     const step = Math.min(d, (this.fight.speed(me) * 0.95 * TICK_MS) / 1000);
     let [ux, uz] = [dx / d, dz / d];
     const t = this.fight.tick;
+    // (rifts and cages are for whoever's turn it is: the plan keeps the others out of them)
     const bad = (this.fight.brain?.hazards() ?? []).filter(
-      (h) => !h.on && h.aim !== me.id && AREA.has(h.shape.k) && (h.zone || (h.end >= t && h.end - t <= URGENT)) && !inside(h.shape, me.x, me.z),
+      (h) => !h.on && h.aim !== me.id && h.soak === undefined && !h.cage && AREA.has(h.shape.k) && (h.zone || (h.end >= t && h.end - t <= URGENT)) && !inside(h.shape, me.x, me.z),
     );
     // 判決傳遞: round anyone I must not touch
     const keep = this.untouchable(me);

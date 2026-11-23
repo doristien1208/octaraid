@@ -15,7 +15,14 @@ export type FoeKind =
   | 'liquid'
   | 'hand'
   | 'doll'
-  | 'iceblock';
+  | 'iceblock'
+  // v0.8: P3 and P4
+  | 'prime'
+  | 'perfect'
+  | 'bird'
+  | 'crystal'
+  | 'lightBeacon'
+  | 'darkBeacon';
 
 export interface FoeInfo {
   name: string;
@@ -47,6 +54,14 @@ export const FOES: Readonly<Record<FoeKind, FoeInfo>> = {
   hand: { name: '水銀之手', ring: 3, boss: true, speed: 0 },
   doll: { name: '獵殺人偶', ring: 1.2, boss: false, speed: 2.2 },
   iceblock: { name: '冰塊', ring: 1.6, boss: false, speed: 0 },
+  // v0.8: P3's 時律機神 and P4's 終式 follow the tank; 時之鳥 flies where its script sends it, the judgement
+  // crystals and the two beacons stand where they appear
+  prime: { name: '時律機神', ring: 4, boss: true, speed: 4 },
+  perfect: { name: '時律機神・終式', ring: 4.5, boss: true, speed: 4 },
+  bird: { name: '時之鳥', ring: 1, boss: false, speed: 0 },
+  crystal: { name: '審判晶石', ring: 1.2, boss: false, speed: 0 },
+  lightBeacon: { name: '光之信標', ring: 1.5, boss: false, speed: 0 },
+  darkBeacon: { name: '暗之信標', ring: 1.5, boss: false, speed: 0 },
 };
 
 export const FOE_KINDS = Object.keys(FOES) as FoeKind[];

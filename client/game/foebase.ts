@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { FOES, type FoeKind } from '../../shared/bosses/foes';
+import type { SnapStatus } from '../../shared/protocol';
 import { box, mesh, toonGradient } from './models';
 
 /**
@@ -15,6 +16,8 @@ export interface FoeView {
   setTargeted(on: boolean): void;
   /** the name of the move it is casting, or null */
   setCasting(name: string | null): void;
+  /** its statuses from the snapshot, for a foe that shows one (時之鳥 turns gold with `gilded`) */
+  setStatuses?(st: readonly SnapStatus[] | undefined): void;
   /** a small shake when something hits it */
   hit(): void;
   /** between phases (cannot be targeted) or gone (dead, broken) */

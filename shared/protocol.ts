@@ -162,7 +162,7 @@ export type FightEvent =
       k: 'boss';
       i: string;
       n: string;
-      m: 'auto' | 'buster' | 'raidwide' | 'jump' | 'prison' | 'adds' | 'revive' | 'bomb' | 'charge' | 'glow' | 'swap' | 'resonance' | 'fuse';
+      m: 'auto' | 'buster' | 'raidwide' | 'jump' | 'prison' | 'adds' | 'revive' | 'bomb' | 'charge' | 'glow' | 'swap' | 'resonance' | 'fuse' | 'key';
       t?: string;
     }
   /** a boss started casting a named move that takes d ticks */

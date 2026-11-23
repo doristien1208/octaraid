@@ -25,7 +25,17 @@ import { Playback } from './playback';
 import { Telegraphs } from './telegraphs';
 
 /** The puff an enemy appears in: rock dust by default, frost for ice, quicksilver for 水銀之手, brass for the dolls. */
-const SPAWN_DUST: Partial<Record<FoeKind, string>> = { prison: '#e8c48a', iceblock: '#cfefff', hand: '#d8e4ee', liquid: '#d8e4ee', doll: '#e0b070' };
+const SPAWN_DUST: Partial<Record<FoeKind, string>> = {
+  prison: '#e8c48a',
+  iceblock: '#cfefff',
+  hand: '#d8e4ee',
+  liquid: '#d8e4ee',
+  doll: '#e0b070',
+  crystal: '#d8c8ff',
+  lightBeacon: '#fff0c0',
+  darkBeacon: '#8a5ad8',
+  bird: '#e0b070',
+};
 
 /** Where the view sends its messages: the server, or the in-browser fight of the practice mode. */
 export interface GameLink {
@@ -218,6 +228,7 @@ export class GameView {
       const f = this.foes.get(e.i)!;
       f.view.setState(e.u === 1, e.g === 1);
       f.view.setCasting(e.c ? e.c[0] : null);
+      f.view.setStatuses?.(e.st);
     }
     for (const [id, f] of this.foes) {
       if (s.e.some((e) => e.i === id)) continue;
@@ -526,6 +537,16 @@ export class GameView {
             ? '獵殺人偶出現了：被盯上的人帶著它遠離王，大家把它打到 25% 以下，再帶進核心或手的圈裡回收（血太多就帶進去會滅團）'
             : '小怪出現了：坦克接住，其他人集火',
         );
+        break;
+      case 'key':
+        // 時之鳥 and the crystals (起源陣)
+        if (e.n === '時之鑰') {
+          this.effects.pillar(b.x, b.z, '#ffd75a', 1.6, 1.2);
+          this.hud.addChat('', '時之鳥碰到了所有審判晶石，變成金色：全隊得到時之鑰，P4 的未來視看得到');
+        } else if (e.n === '晶石碎裂') {
+          this.effects.burst(b.x, 1, b.z, 1.6, '#c9a8ff', 0.5);
+          this.hud.addChat('', '審判晶石放得太靠近王或另一顆晶石，碎掉了');
+        } else this.hud.addChat('', '時之鳥沒碰到全部審判晶石：P4 會看不到未來視');
         break;
       case 'revive':
         this.effects.pillar(b.x, b.z, '#ff7a2c', 1.2, 0.8);

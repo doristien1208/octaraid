@@ -38,7 +38,11 @@ export type Shape =
   /** a number over someone's head: the order they are attacked in */
   | { k: 'num'; n: number }
   /** a freeze check for everyone: do not move when it ends */
-  | { k: 'stop' };
+  | { k: 'stop' }
+  /** the opposite (行動命令): be moving when it ends */
+  | { k: 'go' }
+  /** no area: the way something will travel, from (x0, z0) to (x1, z1) (時之鳥) */
+  | { k: 'path'; x0: number; z0: number; x1: number; z1: number };
 
 /** Is (x, z) out of sight of (sx, sz) behind one of these pillars? */
 export function hidden(sx: number, sz: number, pillars: readonly Pillar[], x: number, z: number): boolean {
@@ -109,6 +113,8 @@ export function inside(s: Shape, x: number, z: number): boolean {
     case 'bomb':
     case 'num':
     case 'stop':
+    case 'go':
+    case 'path':
       return false;
   }
 }

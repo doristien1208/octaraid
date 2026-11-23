@@ -393,7 +393,10 @@ export class Telegraphs {
         const pivot = new THREE.Group();
         pivot.add(beam);
         v.group.add(pivot);
-        const text = this.label(v, `拉開 ${dist} m`, 'b', 0.5, pivot);
+        // a negative distance: they must end up within it (拘束)
+        const close = dist < 0;
+        const need = Math.abs(dist);
+        const text = this.label(v, close ? `靠近 ${need} m 內` : `拉開 ${dist} m`, 'b', 0.5, pivot);
         const a = t.o ?? '';
         v.each = (now, _left, where) => {
           const p = where(a);
@@ -405,9 +408,10 @@ export class Telegraphs {
           pivot.rotation.y = faceTowards(p.x, p.z, q.x, q.z);
           beam.scale.y = Math.max(0.01, d);
           beam.position.z = d / 2;
-          text.el.textContent = d >= dist ? '夠遠了' : `拉開 ${dist} m（${d.toFixed(0)}）`;
+          const ok = close ? d <= need : d >= dist;
+          text.el.textContent = close ? (ok ? '夠近了' : `靠近 ${need} m 內（${d.toFixed(0)}）`) : ok ? '夠遠了' : `拉開 ${dist} m（${d.toFixed(0)}）`;
           text.tag.position.set(0, 0.5, d / 2);
-          beamMat.color.setHex(d >= dist ? COLORS.s : COLORS.b);
+          beamMat.color.setHex(ok ? COLORS.s : COLORS.b);
           beamMat.opacity = 0.65 + Math.sin(now / 90) * 0.2;
         };
         break;
@@ -437,8 +441,32 @@ export class Telegraphs {
         this.label(v, String(n(1)), `${t.c} num`, 3.4);
         break;
       }
-      case 'x': {
-        // the freeze check is shown on the HUD (see the view); nothing on the ground
+      case 'x':
+      case 'v': {
+        // the freeze check (and 行動命令, its opposite) is shown on the HUD (see the view); nothing on the ground
+        break;
+      }
+      case 'a': {
+        // 時之鳥's way: a dashed line with arrowheads from where it sets off to where it lands
+        const [x0, z0, x1, z1] = [n(1), n(2), n(3), n(4)];
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        const holder = new THREE.Group();
+        const mat = this.mat('w', 0.75, v);
+        for (let d = 0.6; d < len - 0.6; d += 1.6) {
+          const dash = this.flat(new THREE.Mesh(this.geo(new THREE.PlaneGeometry(0.35, 0.9), v), mat), 0.05);
+          dash.position.z = d;
+          holder.add(dash);
+        }
+        for (const d of [len * 0.33, len * 0.66, len - 0.4]) {
+          const head = this.flat(new THREE.Mesh(this.geo(new THREE.CircleGeometry(0.75, 3), v), mat), 0.06);
+          head.position.z = d;
+          head.rotation.z = Math.PI / 2;
+          holder.add(head);
+        }
+        holder.position.set(x0, 0, z0);
+        holder.rotation.y = faceTowards(x0, z0, x1, z1);
+        v.group.add(holder);
+        this.label(v, '時之鳥的路線：把晶石放在線上', 'w', 1.2);
         break;
       }
       default: {
@@ -489,8 +517,9 @@ export class Telegraphs {
   }
 
   /** Is a freeze check on its way (the HUD warns), and how long until it ends (ms)? */
-  freezeLeft(list: SnapTele[] | undefined): number | null {
-    const t = list?.find((x) => x.s[0] === 'x');
-    return t ? t.l * TICK_MS : null;
+  freezeLeft(list: SnapTele[] | undefined): { left: number; move: boolean } | null {
+    // the nearest one: 靜止命令 and 行動命令 can both be up, one after the other
+    const t = list?.filter((x) => x.s[0] === 'x' || x.s[0] === 'v').sort((a, b) => a.l - b.l)[0];
+    return t ? { left: t.l * TICK_MS, move: t.s[0] === 'v' } : null;
   }
 }

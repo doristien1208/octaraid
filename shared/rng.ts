@@ -6,6 +6,15 @@ export class Rng {
     this.s = seed >>> 0 || 1;
   }
 
+  /** Where the sequence stands, to replay the same draws (未來視: what is seen and what happens come out the same). */
+  get state(): number {
+    return this.s;
+  }
+
+  set state(v: number) {
+    this.s = v >>> 0 || 1;
+  }
+
   next(): number {
     let t = (this.s = (this.s + 0x6d2b79f5) >>> 0);
     t = Math.imul(t ^ (t >>> 15), t | 1);
