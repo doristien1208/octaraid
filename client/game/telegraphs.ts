@@ -344,11 +344,12 @@ export class Telegraphs {
         // line of sight: the shadows behind the standing pillars are safe (green), out from the caster
         const [sx, sz] = [n(1), n(2)];
         const standing = String(s[3]);
-        const pillars = this.arena.pillars ?? [];
+        // the arena's pillars still standing, then any others that hide players too (冰塊: x, z, r after the bits)
+        const pillars = (this.arena.pillars ?? []).filter((_, k) => standing[k] === '1');
+        for (let k = 4; k + 2 < s.length; k += 3) pillars.push({ x: n(k), z: n(k + 1), r: n(k + 2) });
         const mat = this.mat('s', 0.3, v);
         const edge = this.mat('s', 0.9, v);
-        pillars.forEach((p, k) => {
-          if (standing[k] !== '1') return;
+        pillars.forEach((p) => {
           const d = Math.hypot(p.x - sx, p.z - sz);
           if (d < 0.5) return;
           const half = Math.asin(Math.min(0.95, p.r / d));
@@ -364,7 +365,7 @@ export class Telegraphs {
           holder.position.set(sx, 0, sz);
           v.group.add(holder);
         });
-        this.label(v, '躲到柱子後面', 's', 5);
+        this.label(v, s.length > 4 && !(this.arena.pillars ?? []).length ? '躲到冰塊後面' : '躲到柱子後面', 's', 5);
         break;
       }
       case 'T': {

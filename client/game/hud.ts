@@ -222,7 +222,7 @@ export class Hud {
     this.bossBox = h(
       'div',
       { class: 'hud-boss' },
-      h('div', { class: 'boss-title' }, h('span', { class: `diff ${info.hard ? 'hard' : ''}` }, `${enc.name} ${difficultyName(info.hard)}`)),
+      h('div', { class: 'boss-title' }, h('span', { class: `diff ${info.hard ? 'hard' : ''}` }, `${enc.name} ${difficultyName(info.hard, enc.id)}`)),
       this.bossList,
       note ? h('div', { class: 'boss-note' }, note) : null,
     );
@@ -455,7 +455,12 @@ export class Hud {
   onSnap(s: Snapshot, target: string | null, slots: SlotState[]): number {
     const enc = encounterById(this.info.enc);
     const enrage = (this.info.hard ? enc.times.hard : enc.times.normal).enrage;
-    this.timer.textContent = `${clock(s.el / TICK_RATE)} / 狂暴 ${clock(enrage)}`;
+    if (s.sg) {
+      // the ultimate: each stage has its own clock and enrage (an intermission shows how long it lasts)
+      const [k, ticks, at] = s.sg;
+      const name = enc.stages?.[k] ?? `P${k + 1}`;
+      this.timer.textContent = `${name}　${clock(ticks / TICK_RATE)}${at ? ` / 狂暴 ${clock(at)}` : ''}`;
+    } else this.timer.textContent = `${clock(s.el / TICK_RATE)} / 狂暴 ${clock(enrage)}`;
     const count = s.ph === 0 ? Math.ceil(s.cd / TICK_RATE) : 0;
     if (count !== this.shownCount) {
       this.shownCount = count;
@@ -642,7 +647,17 @@ export class Hud {
         'div',
         { class: 'results-card' },
         h('h2', { class: result.reason === 'clear' ? 'win' : 'lose' }, END_NAMES[result.reason]),
-        h('p', null, `戰鬥時間 ${clock(result.time)}${result.reason === 'clear' ? '' : `，Boss 剩 ${Math.round(result.bossHp * 100)}%`}`),
+        h(
+          'p',
+          null,
+          `戰鬥時間 ${clock(result.time)}${
+            result.reason === 'clear'
+              ? ''
+              : result.stage !== undefined
+                ? `，停在${encounterById(this.info.enc).stages?.[result.stage] ?? `P${result.stage + 1}`}（這個階段的王剩 ${Math.round(result.bossHp * 100)}%）`
+                : `，Boss 剩 ${Math.round(result.bossHp * 100)}%`
+          }`,
+        ),
         h(
           'table',
           { class: 'stats' },

@@ -157,6 +157,8 @@ export interface FightOptions {
   practice?: boolean;
   /** a boss script instead of the duty's own (tests) */
   script?: BossScript;
+  /** the ultimate: start from this stage (offline practice) */
+  stage?: number;
 }
 
 export type UseResult = 'ok' | 'queued' | DenyReason;
@@ -261,7 +263,7 @@ export class Fight {
       id: 'boss',
       auto: script?.auto ?? 0,
     });
-    if (script) this.brain = new BossBrain(this, boss, script);
+    if (script) this.brain = new BossBrain(this, boss, script, opts.stage ?? 0);
   }
 
   get enrageTicks(): number {
@@ -352,6 +354,7 @@ export class Fight {
       reason,
       time: Math.round(this.fightTicks / TICK_RATE),
       bossHp: max ? Math.round((bosses.reduce((n, f) => n + f.hp, 0) / max) * 1000) / 1000 : 0,
+      stage: this.brain?.staged ? this.brain.stageIndex : undefined,
       stats: [...this.players.values()].map((p) => ({ ...p.stats, dmg: Math.round(p.stats.dmg), heal: Math.round(p.stats.heal), taken: Math.round(p.stats.taken) })),
     };
   }
@@ -384,10 +387,14 @@ export class Fight {
       if (foe.gone && this.tick >= (foe.goneAt ?? 0)) this.foes.splice(k, 1);
     }
 
-    const boss = this.brain?.foe ?? this.foes.find((f) => f.boss);
-    if (boss && boss.hp <= 0) this.end('clear');
+    // a boss that has fallen (or gone) no longer steps its script: the script still has to see it
+    const b = this.brain;
+    if (b && b.stepped !== this.tick) b.step();
+    const boss = b?.foe ?? this.foes.find((f) => f.boss);
+    if (b ? b.cleared() : boss && boss.hp <= 0) this.end('clear');
     else if (this.players.size && [...this.players.values()].every((p) => p.dead)) this.end('wipe');
-    else if (this.fightTicks >= this.enrageTicks) this.end('enrage');
+    // the ultimate: each stage has its own enrage
+    else if (b?.staged ? b.enraged() : this.fightTicks >= this.enrageTicks) this.end('enrage');
   }
 
   /** The countdown is over: enemies start with the tanks on top of their lists. */
@@ -834,6 +841,17 @@ export class Fight {
 
   private dealFoe(p: Fighter, e: Foe, amount: number, slot: number, opts: { enmity?: number; pos?: 0 | 1; dot?: boolean; crit?: boolean; dh?: boolean }): void {
     if (!this.hittable(e)) return;
+    const shield = e.statuses.find((s) => s.id === 'plasma');
+    if (shield) {
+      // 電漿護盾: only what comes from in front of it wears the shield down; nothing gets through while it holds
+      const front = Math.abs(angleDiff(e.f, faceTowards(e.x, e.z, p.x, p.z))) <= Math.PI / 2;
+      const taken = front ? Math.min(shield.v, amount) : 0;
+      shield.v -= taken;
+      if (shield.v <= 0) e.statuses = e.statuses.filter((s) => s !== shield);
+      if (!p.dead) e.enmity.set(p.id, (e.enmity.get(p.id) ?? 0) + taken);
+      this.emit({ k: 'dmg', s: p.id, t: e.id, a: 0, ab: taken || undefined, iv: taken ? undefined : 1, sk: slot });
+      return;
+    }
     if (e.minHp !== undefined && e.hp <= e.minHp) {
       this.emit({ k: 'dmg', s: p.id, t: e.id, a: 0, iv: 1, sk: slot });
       return;
@@ -1094,6 +1112,12 @@ export class Fight {
       if (p.dead) continue;
       for (const s of [...p.statuses]) {
         if (STATUS[s.id].hot) this.heal(this.players.get(s.src) ?? null, p, s.v * n, false, true);
+        else if (STATUS[s.id].dot && s.v > 0 && !p.dead) {
+          // an enemy's mark that burns (判決印)
+          this.hitName = STATUS[s.id].name;
+          this.hurt(p, s.v * n, this.foes.find((e) => e.id === s.src) ?? null);
+          this.hitName = null;
+        }
       }
       for (const z of this.zones) {
         const zoneHot = STATUS[z.s].zoneHot;
@@ -1319,7 +1343,14 @@ export class Fight {
           shape = ['g', s.n, s.cells];
           break;
         case 'los':
-          shape = ['s', r2(s.x), r2(s.z), pillars.map((p) => (s.pillars.includes(p) && !this.pillarsBroken[pillars.indexOf(p)] ? '1' : '0')).join('')];
+          // the arena's pillars as a bit string, then any others standing (冰塊) as x, z, r
+          shape = [
+            's',
+            r2(s.x),
+            r2(s.z),
+            pillars.map((p) => (s.pillars.includes(p) && !this.pillarsBroken[pillars.indexOf(p)] ? '1' : '0')).join(''),
+            ...s.pillars.filter((p) => !pillars.includes(p)).flatMap((p) => [r2(p.x), r2(p.z), p.r]),
+          ];
           break;
         case 'tower':
           shape = ['T', r2(s.x), r2(s.z), s.r, s.need];
@@ -1408,6 +1439,7 @@ export class Fight {
         : undefined,
       tg: this.telegraphs(),
       pb: this.pillarsBroken.some((x) => x) ? this.pillarsBroken.flatMap((x, k) => (x ? [k] : [])) : undefined,
+      sg: this.brain?.staged ? this.brain.stageClock() : undefined,
       ev: ev.length ? ev : undefined,
     };
   }

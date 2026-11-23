@@ -1,8 +1,8 @@
 import { hasBoss } from '../../shared/bosses';
 import { MAX_PLAYERS, RULES } from '../../shared/constants';
-import { ENCOUNTERS, KIND_NAMES, VOTE_OPTIONS, clock, difficultyName, optionLabel } from '../../shared/encounters';
+import { ENCOUNTERS, KIND_NAMES, clock, difficultyName, optionLabel, voteOption } from '../../shared/encounters';
 import { JOBS, LIMIT_BREAKS, ROLE_COLORS, ROLE_NAMES, SPRINT_SLOT, jobById, skillAt, type JobId, type Role } from '../../shared/jobs';
-import { ROLE_CAPS, hpScale, partyNotes, roleCounts, roleHasRoom } from '../../shared/party';
+import { ROLE_CAPS, ULTIMATE_NEEDS, hpScale, optionOpen, partyNotes, roleCounts, roleHasRoom } from '../../shared/party';
 import type { C2S, RoomMember, RoomView } from '../../shared/protocol';
 import type { Tally } from '../../shared/vote';
 import type { Audio } from '../audio';
@@ -112,7 +112,7 @@ export class RoomScreen {
           'section',
           { class: 'panel vote' },
           h('h3', null, '投票：要打哪一關'),
-          h('p', { class: 'muted small' }, '出發時 8 個選項一起開票，票最多的就打；平手隨機，沒人投票也隨機。再點一次取消。'),
+          h('p', { class: 'muted small' }, '出發時 9 個選項一起開票，票最多的就打；平手隨機，沒人投票也隨機。絕本要至少 4 人且有 1 坦 1 補 2 DPS，不然投它的票不算。再點一次取消。'),
           this.voteBox,
         ),
       ),
@@ -282,21 +282,26 @@ export class RoomScreen {
     clear(this.voteBox);
     const myVote = this.me?.vote ?? null;
     const open = view.phase === 'waiting';
-    for (const [k, enc] of ENCOUNTERS.entries()) {
-      const buttons = [false, true].map((hard) => {
-        const opt = VOTE_OPTIONS[k * 2 + (hard ? 1 : 0)]!;
+    const jobs = view.members.map((m) => m.job);
+    for (const enc of ENCOUNTERS) {
+      const ult = enc.kind === 'ultimate';
+      const buttons = (ult ? [true] : [false, true]).map((hard) => {
+        const opt = voteOption(enc.id, hard);
         const voters = view.members.filter((m) => m.vote === opt.index);
         const t = hard ? enc.times.hard : enc.times.normal;
+        // the ultimate needs 4 players with 1 tank, 1 healer and 2 DPS: votes for it do not count otherwise
+        const shut = !optionOpen(opt.index, jobs);
         return h(
           'button',
           {
-            class: `vote-btn ${hard ? 'hard' : 'normal'} ${myVote === opt.index ? 'on' : ''}`,
-            disabled: !open,
+            class: `vote-btn ${ult ? 'ultimate' : hard ? 'hard' : 'normal'} ${myVote === opt.index ? 'on' : ''} ${shut ? 'shut' : ''}`,
+            disabled: !open || (shut && myVote !== opt.index),
+            title: shut ? `需要${ULTIMATE_NEEDS}` : undefined,
             onclick: () => this.send({ t: 'vote', opt: myVote === opt.index ? null : opt.index }),
           },
-          h('span', { class: 'diff' }, difficultyName(hard)),
-          h('span', { class: 'muted small' }, `約 ${clock(t.target)}，狂暴 ${clock(t.enrage)}`),
-          h('span', { class: 'count' }, voters.length ? `${voters.length} 票` : ''),
+          h('span', { class: 'diff' }, difficultyName(hard, enc.id)),
+          h('span', { class: 'muted small' }, shut ? `需要${ULTIMATE_NEEDS}` : ult ? `約 ${clock(t.target)}，每階段各自狂暴` : `約 ${clock(t.target)}，狂暴 ${clock(t.enrage)}`),
+          h('span', { class: 'count' }, voters.length ? `${voters.length} 票${shut ? '（不計）' : ''}` : ''),
           h('span', { class: 'voters small' }, voters.map((m) => m.name).join('、')),
         );
       });

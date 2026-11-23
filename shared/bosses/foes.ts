@@ -1,5 +1,21 @@
 /** Every kind of enemy: the training dummy, the bosses and what they summon. */
-export type FoeKind = 'dummy' | 'colossus' | 'golem' | 'prison' | 'frostwitch' | 'mirror' | 'gatekeeper' | 'drone' | 'ember' | 'frost' | 'bipolar';
+export type FoeKind =
+  | 'dummy'
+  | 'colossus'
+  | 'golem'
+  | 'prison'
+  | 'frostwitch'
+  | 'mirror'
+  | 'gatekeeper'
+  | 'drone'
+  | 'ember'
+  | 'frost'
+  | 'bipolar'
+  // 時律機神殿 (the ultimate, v0.7)
+  | 'liquid'
+  | 'hand'
+  | 'doll'
+  | 'iceblock';
 
 export interface FoeInfo {
   name: string;
@@ -25,6 +41,12 @@ export const FOES: Readonly<Record<FoeKind, FoeInfo>> = {
   ember: { name: '熾核', ring: 2.6, boss: true, speed: 5 },
   frost: { name: '凍核', ring: 2.6, boss: true, speed: 0 },
   bipolar: { name: '雙極機神', ring: 4, boss: true, speed: 4.5 },
+  // 時律機神殿 (v0.7): P1's 水銀核心 follows the tank, its hand stays where it rose; the dolls walk after
+  // whoever they are on; 凍核's ice block stands still. P2 brings back 熾核 and 凍核
+  liquid: { name: '水銀核心', ring: 3.5, boss: true, speed: 4 },
+  hand: { name: '水銀之手', ring: 3, boss: true, speed: 0 },
+  doll: { name: '獵殺人偶', ring: 1.2, boss: false, speed: 2.2 },
+  iceblock: { name: '冰塊', ring: 1.6, boss: false, speed: 0 },
 };
 
 export const FOE_KINDS = Object.keys(FOES) as FoeKind[];

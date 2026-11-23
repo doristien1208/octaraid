@@ -1,7 +1,7 @@
 import { MAX_PLAYERS } from '../../shared/constants';
 import { ENCOUNTERS, KIND_NAMES, clock, difficultyName } from '../../shared/encounters';
 import { JOBS, ROLE_COLORS, ROLE_NAMES, isJobId, jobById, type JobId, type Role } from '../../shared/jobs';
-import { hpScale, partyNotes, practiceParty, roleCounts } from '../../shared/party';
+import { ULTIMATE_NEEDS, hpScale, partyNotes, practiceParty, roleCounts } from '../../shared/party';
 import type { Audio } from '../audio';
 import { clear, h, store } from '../dom';
 import { jobBadge, settingsModal } from './common';
@@ -20,11 +20,15 @@ interface Choice {
   job: JobId;
   n: number;
   foe: Foe;
+  /** the ultimate: the stage to start from */
+  stage: number;
 }
+
+const isUltimate = (c: Choice) => ENCOUNTERS[c.boss]?.kind === 'ultimate';
 
 /** The last choice on this computer, or the defaults (崩岩巨像 Normal, 鐵壁衛士, 4 people). */
 function load(): Choice {
-  const c: Choice = { boss: 0, hard: false, job: 'guardian', n: 4, foe: 'boss' };
+  const c: Choice = { boss: 0, hard: false, job: 'guardian', n: 4, foe: 'boss', stage: 0 };
   try {
     const v = JSON.parse(store.get(KEY) ?? '{}') as Partial<Record<keyof Choice, unknown>>;
     if (Number.isInteger(v.boss) && (v.boss as number) >= 0 && (v.boss as number) < ENCOUNTERS.length) c.boss = v.boss as number;
@@ -32,6 +36,7 @@ function load(): Choice {
     if (typeof v.job === 'string' && isJobId(v.job)) c.job = v.job;
     if (Number.isInteger(v.n) && (v.n as number) >= 1 && (v.n as number) <= MAX_PLAYERS) c.n = v.n as number;
     if (v.foe === 'dummy' || v.foe === 'calm') c.foe = v.foe;
+    if (Number.isInteger(v.stage) && (v.stage as number) >= 0 && (v.stage as number) < (ENCOUNTERS[c.boss]?.stages?.length ?? 0)) c.stage = v.stage as number;
   } catch {
     /* a broken entry: the defaults */
   }
@@ -40,7 +45,15 @@ function load(): Choice {
 
 /** The address of the offline practice (client/sandbox.ts) for a choice. */
 function practiceUrl(c: Choice): string {
-  const q = [`boss=${c.boss}`, c.hard ? 'hard' : '', `job=${c.job}`, `n=${c.n}`, c.foe === 'boss' ? '' : c.foe].filter(Boolean);
+  const ult = isUltimate(c);
+  const q = [
+    `boss=${c.boss}`,
+    c.hard || ult ? 'hard' : '',
+    `job=${c.job}`,
+    `n=${ult ? Math.max(4, c.n) : c.n}`,
+    c.foe === 'boss' ? '' : c.foe,
+    ult && c.stage ? `stage=${c.stage}` : '',
+  ].filter(Boolean);
   return `${location.pathname}?sandbox&${q.join('&')}`;
 }
 
@@ -56,6 +69,8 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
   const sizes = h('div', { class: 'seg fill' });
   const foes = h('div', { class: 'seg fill' });
   const party = h('div', { class: 'practice-party' });
+  const stages = h('div', { class: 'seg fill' });
+  const stageBox = h('div', { class: 'practice-stages' }, h('span', { class: 'muted small' }, '從哪個階段開始（前面的階段跳過）'), stages);
   const summary = h('p', { class: 'practice-summary' });
 
   const start = () => {
@@ -77,20 +92,23 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
             h('span', { class: `kind ${enc.kind}` }, KIND_NAMES[enc.kind]),
             h('span', { class: 'muted small' }, `學：${enc.learn}`),
           ),
-          ...[false, true].map((hard) => {
+          ...(enc.kind === 'ultimate' ? [true] : [false, true]).map((hard) => {
             const t = hard ? enc.times.hard : enc.times.normal;
+            const ult = enc.kind === 'ultimate';
             return h(
               'button',
               {
-                class: `vote-btn ${hard ? 'hard' : 'normal'} ${c.boss === k && c.hard === hard ? 'on' : ''}`,
+                class: `vote-btn ${ult ? 'ultimate' : hard ? 'hard' : 'normal'} ${c.boss === k && (ult || c.hard === hard) ? 'on' : ''}`,
                 onclick: () => {
                   c.boss = k;
                   c.hard = hard;
+                  if (ult) c.n = Math.max(4, c.n);
+                  else c.stage = 0;
                   paint();
                 },
               },
-              h('span', { class: 'diff' }, difficultyName(hard)),
-              h('span', { class: 'muted small' }, `約 ${clock(t.target)}，狂暴 ${clock(t.enrage)}`),
+              h('span', { class: 'diff' }, difficultyName(hard, enc.id)),
+              h('span', { class: 'muted small' }, ult ? `約 ${clock(t.target)}，每階段各自狂暴` : `約 ${clock(t.target)}，狂暴 ${clock(t.enrage)}`),
             );
           }),
         ),
@@ -98,12 +116,14 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
     }
     for (const [id, card] of jobCards) card.classList.toggle('on', c.job === id);
 
+    const ult = isUltimate(c);
     sizes.replaceChildren(
       ...Array.from({ length: MAX_PLAYERS }, (_, k) =>
         h(
           'button',
           {
             class: c.n === k + 1 ? 'on' : '',
+            disabled: ult && k + 1 < 4,
             onclick: () => {
               c.n = k + 1;
               paint();
@@ -113,6 +133,23 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
         ),
       ),
     );
+    const stageList = ENCOUNTERS[c.boss]?.stages ?? [];
+    stages.replaceChildren(
+      ...stageList.map((name, k) =>
+        h(
+          'button',
+          {
+            class: c.stage === k ? 'on' : '',
+            onclick: () => {
+              c.stage = k;
+              paint();
+            },
+          },
+          name,
+        ),
+      ),
+    );
+    stageBox.hidden = !ult;
     foes.replaceChildren(
       ...(['boss', 'dummy', 'calm'] as const).map((f) =>
         h(
@@ -129,7 +166,7 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
       ),
     );
 
-    const jobs = practiceParty(c.job, c.n);
+    const jobs = practiceParty(c.job, c.n, ult);
     const n = roleCounts(jobs);
     clear(party);
     party.append(
@@ -148,10 +185,10 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
         ...ROLES.map((r) => h('span', { class: 'role-chip', style: { borderColor: ROLE_COLORS[r] } }, `${ROLE_NAMES[r]} ${n[r]}`)),
       ),
       h('p', { class: 'small' }, `Boss 血量 ${Math.round(hpScale(jobs) * 100)}%`, h('span', { class: 'muted' }, '（1 坦 1 補 2 DPS 為 100%）')),
-      ...partyNotes(jobs).map((t) => h('p', { class: 'note small' }, t)),
+      ...(ult ? [h('p', { class: 'note small' }, `絕本需要${ULTIMATE_NEEDS}：電腦隊友會補齊`)] : partyNotes(jobs).map((t) => h('p', { class: 'note small' }, t))),
     );
     const enc = ENCOUNTERS[c.boss]!;
-    summary.textContent = `${enc.name} ${difficultyName(c.hard)} · ${jobById(c.job).name} · ${c.n} 人${c.foe === 'boss' ? '' : ` · 對手換成${FOE_NAMES[c.foe]}`}`;
+    summary.textContent = `${enc.name} ${difficultyName(c.hard, enc.id)}${ult ? ` · 從${stageList[c.stage] ?? stageList[0]}開始` : ''} · ${jobById(c.job).name} · ${jobs.length} 人${c.foe === 'boss' ? '' : ` · 對手換成${FOE_NAMES[c.foe]}`}`;
   };
 
   const groups = ROLES.map((role) =>
@@ -204,6 +241,7 @@ export function practiceScreen(opts: { audio: Audio; /** my nickname, or '' */ n
         h('h3', null, '選擇副本'),
         h('p', { class: 'muted small' }, '在這台電腦上跑，不用開房；其他隊員由電腦擔任，會自己走位、出招、補血與復活。'),
         duties,
+        stageBox,
       ),
       h(
         'section',

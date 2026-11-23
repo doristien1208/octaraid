@@ -36,12 +36,14 @@ function near(shape: Shape, x: number, z: number): boolean {
 interface Shared {
   towers: Map<number, Map<string, number>>;
   pillars: Map<number, { chosen: Pillar[]; slots: Map<string, [number, number]> }>;
+  /** numbered charges at everyone (數字裁斷): each number's angle round the middle */
+  lanes: Map<number, Map<string, number>>;
 }
 const SHARED = new WeakMap<Fight, Shared>();
 function shared(f: Fight): Shared {
   let s = SHARED.get(f);
   if (!s) {
-    s = { towers: new Map(), pillars: new Map() };
+    s = { towers: new Map(), pillars: new Map(), lanes: new Map() };
     SHARED.set(f, s);
   }
   return s;
@@ -55,6 +57,11 @@ function hiddenWell(los: Extract<Shape, { k: 'los' }>, x: number, z: number): bo
   const ok = (px: number, pz: number) => hidden(los.x, los.z, los.pillars, px, pz);
   return ok(x, z) && ok(x + 0.4, z) && ok(x - 0.4, z) && ok(x, z + 0.4) && ok(x, z - 0.4);
 }
+
+/** 判決傳遞: the marks, and who must hold which one at 宣判. */
+const markOf = (q: Fighter) => q.statuses.find((s) => s.id === 'nisiA' || s.id === 'nisiB')?.id ?? null;
+const decreeOf = (q: Fighter) => (q.statuses.some((s) => s.id === 'decreeA') ? 'nisiA' : q.statuses.some((s) => s.id === 'decreeB') ? 'nisiB' : null);
+const isMelee = (q: Fighter) => q.job.id === 'brawler' || q.job.id === 'lancer';
 
 /** Who joins a shared tank buster first: another tank, then melee, then other DPS, then healers. */
 function joinOrder(q: Fighter): number {
@@ -123,10 +130,10 @@ export class Bot {
     });
   }
 
-  /** Something is about to land: no jumping around for now. */
+  /** Something is about to land, or something lingers on the floor: no jumping around for now. */
   private busy(): boolean {
     const t = this.fight.tick;
-    return !!this.fight.brain?.hazards().some((h) => !h.zone && h.end >= t && h.end - t <= HORIZON);
+    return !!this.fight.brain?.hazards().some((h) => h.zone || (h.end >= t && h.end - t <= HORIZON));
   }
 
   // ------------------------------------------------------------------ what to hit
@@ -145,9 +152,31 @@ export class Bot {
     const helpers = f.living().filter((q) => q.role !== 'tank' && q.id !== prison?.owner).length;
     const pushing = !!prison && !!f.brain?.hazards().some((h) => h.shape.k === 'push' && h.end >= f.tick);
     if (prison && !pushing && (me.role !== 'tank' || !helpers)) return prison;
-    const bosses = live.filter((e) => e.boss);
+    // 電漿護盾: everyone but the tanks on the shielded one (from in front of it)
+    const shielded = live.find((e) => e.statuses.some((s) => s.id === 'plasma'));
+    if (shielded && me.role !== 'tank') return shielded;
+    // 獵殺人偶: the dolls down below the line first (not the tanks: the boss is theirs)
+    const feed = f.brain?.feed;
+    if (feed && me.role !== 'tank') {
+      const high = live.filter((e) => !e.boss && e.kind !== 'prison' && e.hp / e.maxHp > feed.pct - 0.03);
+      if (high.length) return high.reduce((a, b) => (b.hp / b.maxHp > a.hp / a.maxHp ? b : a));
+    }
+    // a boss standing in a pool is out of a melee player's reach for now
+    const reachable = (e: Foe) =>
+      !isMelee(me) ||
+      Array.from({ length: 8 }, (_, k) => (k * Math.PI) / 4).some((a) => {
+        const [x, z] = [e.x + Math.sin(a) * (e.r + 1.5), e.z + Math.cos(a) * (e.r + 1.5)];
+        return !f.brain?.hazards().some((h) => h.zone && near(h.shape, x, z));
+      });
+    const all = live.filter((e) => e.boss);
+    const bosses = all.length > 1 && all.some(reachable) ? all.filter(reachable) : all;
     if (bosses.length) {
       const main = bosses.find((e) => e === f.brain?.foe) ?? bosses[0]!;
+      if (me.role === 'tank' && f.brain?.staged && bosses.length > 1) {
+        // the ultimate's pairs that must stay even (痛苦之手): the tank evens them out from where it holds its boss
+        const other = bosses.find((e) => e !== main);
+        if (other && main.hp / main.maxHp < other.hp / other.maxHp - 0.01 && reach(me.x, me.z, other) <= 20) return other;
+      }
       if (bosses.length === 1 || me.role === 'tank') return main;
       const share = (e: Foe) => e.hp / e.maxHp;
       const last = bosses.find((e) => e.id === this.lastFocus);
@@ -199,9 +228,35 @@ export class Bot {
     // whoever a walking boss follows (the tank, or anyone when there is none) holds it where the party
     // wants it: they stand still there and the boss comes to them, instead of being chased round the room
     const main = f.brain?.foe;
-    if (main && main.speed > 0 && f.hittable(main) && (me.role === 'tank' ? focus === main : f.topOf(main)?.id === me.id)) {
+    // a doll walking after me (獵殺人偶): keep it away from the bosses until it is low enough, then walk it in
+    const feed = f.brain?.feed;
+    const doll = feed ? f.foes.find((e) => !e.boss && !e.gone && e.hp > 0 && f.topOf(e)?.id === me.id) : undefined;
+    if (doll && feed) {
+      const bosses = f.foes.filter((e) => e.boss && !e.gone && e.hp > 0);
+      const nearest = bosses.reduce<Foe | null>((a, b) => (!a || Math.hypot(b.x - doll.x, b.z - doll.z) < Math.hypot(a.x - doll.x, a.z - doll.z) ? b : a), null);
+      if (doll.hp / doll.maxHp <= feed.pct - 0.01 && nearest) return [nearest.x, nearest.z];
+      if (nearest) {
+        // the doll between me and the boss, so it walks away from it
+        const d = Math.hypot(doll.x - nearest.x, doll.z - nearest.z) || 1;
+        return clampToArena(f.enc.arena, doll.x + ((doll.x - nearest.x) / d) * 5, doll.z + ((doll.z - nearest.z) / d) * 5);
+      }
+    }
+    if (main && main.speed > 0 && f.hittable(main) && (me.role === 'tank' ? focus === main || (!!f.brain?.staged && focus.boss) : f.topOf(main)?.id === me.id)) {
       const [hx, hz] = f.brain!.home(main);
+      // the ultimate wants the boss on the spot (合掌, 栓塞): stand past it, so the boss stops right there
+      const off = Math.hypot(hx - main.x, hz - main.z);
+      if (f.brain?.staged && off > 1.5) {
+        const reachTo = main.r + RULES.bossReach - 0.4;
+        return clampToArena(f.enc.arena, hx + ((hx - main.x) / off) * reachTo, hz + ((hz - main.z) / off) * reachTo);
+      }
       return around(hx, hz, main.r, main.f);
+    }
+    // 電漿護盾: hit it from in front (melee close, the rest a little further out)
+    if (focus.statuses.some((s) => s.id === 'plasma')) {
+      const [ang, dist] = this.spot;
+      const a = focus.f + Math.max(-0.9, Math.min(0.9, ang * 0.4));
+      const r = focus.r + (isMelee(me) ? 1 : Math.min(6, dist));
+      return clampToArena(f.enc.arena, focus.x + Math.sin(a) * r, focus.z + Math.cos(a) * r);
     }
     if (focus.boss) return around(focus.x, focus.z, focus.r, focus.f);
     if (me.job.id === 'brawler' || me.job.id === 'lancer') {
@@ -230,8 +285,10 @@ export class Bot {
     const t = f.tick;
     const ahead = (h: Tele) => (['los', 'tower', 'tether'].includes(h.shape.k) ? AHEAD : HORIZON);
     const hz = brain.hazards().filter((h) => h.zone || (h.end >= t && h.end - t <= ahead(h)));
-    if (!hz.length) return base;
     const boss = brain.foe;
+    // 超級跳躍 shows nothing on the ground: the cast is the cue; 判決傳遞 has nothing on the ground either
+    const jumping = boss.cast?.name === '超級跳躍';
+    if (!hz.length && !jumping && !f.living().some((q) => markOf(q))) return base;
     const size = f.enc.arena.size;
     const at = (a: number, r: number): [number, number] => clampToArena(f.enc.arena, boss.x + Math.sin(a) * r, boss.z + Math.cos(a) * r);
     // slots for spreads, stacks and tethers are kept round where the boss is meant to be, not where it is
@@ -285,7 +342,37 @@ export class Bot {
     }
     const myNum = nums.find((n) => n.q.id === me.id);
     if (myNum && myNum.h.shape.k === 'num') {
-      if (myNum.h.color === 'r') {
+      // every number of the set, however far off (the plan looks past the usual horizon)
+      const all = brain
+        .hazards()
+        .filter((h) => h.shape.k === 'num' && h.color === 'r' && h.end >= t)
+        .map((h) => ({ h, q: brain.holder(h) }))
+        .filter((x): x is { h: Tele; q: Fighter } => !!x.q && !x.q.dead);
+      const everyone = all.length >= living.length - 1 && all.length >= 3;
+      if (myNum.h.color === 'r' && everyone && brain.staged) {
+        // a charge at everyone in turn (數字裁斷): round the middle in number order, evenly apart, so each charge
+        // runs from where the last one ended to the next number with nobody in between
+        const plans = shared(f).lanes;
+        // the set is known by its numbers' ids: the plan made for the first of them holds until the last goes
+        const ids = new Set(all.map((n) => n.h.id));
+        let key = [...plans.keys()].find((k) => [...ids].some((id) => id >= k && id < k + 64));
+        if (key === undefined) key = Math.min(...ids);
+        let plan = plans.get(key);
+        if (!plan) {
+          plan = new Map<string, number>();
+          const order = [...all].sort((a, b) => (a.h.shape.k === 'num' && b.h.shape.k === 'num' ? a.h.shape.n - b.h.shape.n : 0));
+          const first = order[0]!.q;
+          const a0 = Math.atan2(first.x, first.z);
+          order.forEach((n, k) => plan!.set(n.q.id, a0 + (k * 2 * Math.PI) / order.length));
+          for (const id of plans.keys()) if (id < key) plans.delete(id);
+          plans.set(key, plan);
+        }
+        // 9 m out: far enough apart that no charge's strip crosses another number, inside the blasts going round
+        // the edge (鷹爆)
+        const a = plan.get(me.id) ?? Math.atan2(me.x, me.z);
+        const r = Math.min(9, size * 0.42);
+        want(clampToArena(f.enc.arena, Math.sin(a) * r, Math.cos(a) * r), 14);
+      } else if (myNum.h.color === 'r') {
         // a charge comes at me: out to the edge along a line from the boss that nobody else stands on,
         // as close to the way I already am from it as that allows
         const mine = Math.atan2(me.x - boss.x, me.z - boss.z);
@@ -316,7 +403,27 @@ export class Bot {
       }
     }
     let stackOn: Fighter | null = null;
-    const exact = stacks.find((s) => s.h.exact);
+    // 壓縮水 (3 or more) / 壓縮雷 (exactly 2): 水 east of the boss, 雷 west, at fixed spots the holder and the
+    // others go to; not the tanks (the boss is theirs) unless they are needed, and for 雷 someone who can take
+    // it next (no 水, not held 雷 before) first
+    const passing = stacks.find((s) => s.h.pass);
+    if (passing) {
+      // a tank holding it keeps the boss where it is: the others come to the tank
+      const spot: [number, number] = passing.q.role === 'tank' ? [passing.q.x, passing.q.z] : atHome(passing.h.exact ? -Math.PI / 2 : Math.PI / 2, boss.r + 2.5);
+      const n = Number(passing.h.text ?? '2') - 1;
+      const holds = (q: Fighter, ...ids: string[]) => q.statuses.some((s) => ids.includes(s.id));
+      const d = (q: Fighter) => Math.hypot(q.x - passing.q.x, q.z - passing.q.z);
+      // 雷: someone who can take it next, DPS before the tank before a healer (the healer already carries 水)
+      const order = (q: Fighter) => (passing.h.exact ? (holds(q, 'water', 'boltDown') ? 10 : 0) + (q.role === 'dps' ? 0 : q.role === 'tank' ? 1 : 2) : q.role === 'tank' ? 1 : 0);
+      const pool = living.filter((q) => q.id !== passing.q.id).sort((a, b) => order(a) - order(b) || d(a) - d(b) || a.id.localeCompare(b.id));
+      const join = passing.h.exact ? pool.slice(0, n) : pool.filter((q, k) => k < n || q.role !== 'tank');
+      if (passing.q.id === me.id) want(me.role === 'tank' ? base : spot, 12);
+      else if (join.some((q) => q.id === me.id)) {
+        stackOn = passing.q;
+        want(spot, 12);
+      }
+    }
+    const exact = stacks.find((s) => s.h.exact && !s.h.pass);
     if (exact) {
       // 分攤死刑: the other tanks first, then melee, then the rest; exactly as many as it wants
       const n = Number(exact.h.text ?? '2') - 1;
@@ -341,7 +448,7 @@ export class Bot {
         want([target.q.x, target.q.z], 12);
       }
     }
-    const plain = stacks.filter((s) => s.h.color === 'y' && !s.h.exact);
+    const plain = stacks.filter((s) => s.h.color === 'y' && !s.h.exact && !s.h.pass);
     if (plain.length && !stackOn) {
       const k = plain.findIndex((s) => s.q.id === me.id);
       const n = plain.length;
@@ -377,6 +484,22 @@ export class Bot {
     }
     const myTower = this.towerFor(me, towers, living);
     if (myTower && myTower.shape.k === 'tower') want([myTower.shape.x, myTower.shape.z], 14);
+    // 超級跳躍: the tank takes it to the edge square to 凍核's line, so the beam runs across the middle and
+    // past 凍核; the rest wait on 凍核's side of it (melee still on 凍核)
+    if (jumping) {
+      const tw = brain.twin;
+      const d = tw ? Math.hypot(tw.x, tw.z) || 1 : 1;
+      const [fx, fz] = tw ? [tw.x / d, tw.z / d] : [0, -1];
+      const [px, pz] = [-fz, fx];
+      if (f.topOf(boss)?.id === me.id) want([px * (size - 1.2), pz * (size - 1.2)], 16);
+      else {
+        const side = (rank % 2 ? 1 : -1) * (1 + (rank >> 1));
+        want(clampToArena(f.enc.arena, fx * 8.5 + px * side * 2.5, fz * 8.5 + pz * side * 2.5), 14);
+      }
+    }
+    // 判決傳遞: my mark to whoever must hold it at 宣判; nobody else touches anyone holding one
+    const { marking, mine, passTo, passFrom } = this.marks(me);
+    if (passTo) want([passTo.x, passTo.z], 20);
     if (los && los.shape.k === 'los') {
       const spot = this.pillarSpot(me, los, living);
       if (spot) want(spot, 16);
@@ -420,14 +543,28 @@ export class Bot {
     // the way there: a spot that is safe but past something going off just as I would walk through it
     // (not something I already stand in: any way out crosses that one)
     const crossing = [...areas, ...aimed.filter((h) => h.aim !== me.id)].filter((h) => !h.zone && h.end >= t && !inside(h.shape, me.x, me.z));
+    const pools = areas.filter((h) => h.zone && !inside(h.shape, me.x, me.z));
     const pathCost = (x: number, z: number): number => {
       const d = Math.hypot(x - me.x, z - me.z);
-      if (d < 1.5 || !crossing.length) return 0;
+      if (d < 1.5 || (!crossing.length && !pools.length)) return 0;
       for (let k = 1; k <= 4; k++) {
         const px = me.x + ((x - me.x) * k) / 5;
         const pz = me.z + ((z - me.z) * k) / 5;
         const arrive = t + (((d * k) / 5) / RULES.moveSpeed) * TICK_RATE;
         if (crossing.some((h) => Math.abs(h.end - arrive) < TICK_RATE * 0.8 && inside(h.shape, px, pz))) return 700;
+        // through a pool I am not standing in
+        if (pools.some((h) => inside(h.shape, px, pz))) return 400;
+      }
+      return 0;
+    };
+    // standing in something about to go off: the way to a spot must leave it in time (walking straight there)
+    const standing = [...areas, ...aimed.filter((h) => h.aim !== me.id)].filter((h) => !h.zone && h.end >= t && h.end - t <= URGENT + TICK_RATE && inside(h.shape, me.x, me.z));
+    const exitCost = (x: number, z: number): number => {
+      const d = Math.hypot(x - me.x, z - me.z);
+      for (const h of standing) {
+        const walked = Math.min(d, RULES.moveSpeed * Math.max(0, (h.end - t) / TICK_RATE - 0.2));
+        const k = d > 0.01 ? walked / d : 0;
+        if (inside(h.shape, me.x + (x - me.x) * k, me.z + (z - me.z) * k)) return 900;
       }
       return 0;
     };
@@ -443,7 +580,7 @@ export class Bot {
       const [x, z] = clampToArena(f.enc.arena, c[0], c[1]);
       let cost = Math.hypot(x - pref[0], z - pref[1]) * (stackOn ? 12 : weight);
       cost += Math.hypot(x - me.x, z - me.z) * travel;
-      if (cost < bestCost) cost += pathCost(x, z);
+      if (cost < bestCost) cost += pathCost(x, z) + exitCost(x, z);
       if (Math.hypot(x - me.x, z - me.z) / RULES.moveSpeed > soon + 0.2) cost += 150;
       for (const h of areas) {
         if (cost >= bestCost) break;
@@ -479,6 +616,23 @@ export class Bot {
         if (Math.hypot(x - s.q.x, z - s.q.z) <= r + 1) cost += 600; // a stack that is not mine
       }
       for (const h of towers) if (h !== myTower && inside(h.shape, x, z)) cost += 150;
+      if (marking) {
+        // touching passes a mark on (and α touching β takes both down): only the planned pass
+        for (const q of others) {
+          if (q === passTo || q === passFrom || (!mine && !markOf(q))) continue;
+          const d = Math.hypot(x - q.x, z - q.z);
+          if (d < 1.8) cost += 900;
+          else if (d < 2.6) cost += 120;
+          // walking past them on the way there
+          const sx = x - me.x;
+          const sz = z - me.z;
+          const len2 = sx * sx + sz * sz;
+          if (len2 > 0.01) {
+            const u = Math.max(0, Math.min(1, ((q.x - me.x) * sx + (q.z - me.z) * sz) / len2));
+            if (Math.hypot(me.x + sx * u - q.x, me.z + sz * u - q.z) < 1.6) cost += 600;
+          }
+        }
+      }
       // my tower about to go off: being in it is a must (an empty tower hurts everyone)
       if (myTower && myTower.end - t <= URGENT && !inside(myTower.shape, x, z)) cost += 900;
       // the same for the stack I am meant to share: a stack short of people hurts whoever holds it
@@ -493,6 +647,29 @@ export class Bot {
       }
     }
     return best;
+  }
+
+  /**
+   * 判決傳遞: whether marks are out, mine, who I am taking mine to (whoever must hold it at 宣判, free to take
+   * it), and who is bringing me one.
+   */
+  private marks(me: Fighter): { marking: boolean; mine: string | null; passTo: Fighter | null; passFrom: Fighter | null } {
+    const living = this.fight.living();
+    const marking = living.some((q) => markOf(q));
+    const mine = markOf(me);
+    if (!marking) return { marking, mine, passTo: null, passFrom: null };
+    const others = living.filter((q) => q.id !== me.id);
+    const free = (q: Fighter) => !markOf(q) && !q.statuses.some((s) => s.id === 'nisiCd' || s.id === 'risen');
+    const passTo = mine && decreeOf(me) !== mine ? (others.find((q) => decreeOf(q) === mine && free(q)) ?? null) : null;
+    const passFrom = decreeOf(me) && free(me) ? (others.find((q) => markOf(q) === decreeOf(me) && decreeOf(q) !== markOf(q)) ?? null) : null;
+    return { marking, mine, passTo, passFrom };
+  }
+
+  /** Players I must not touch right now (判決傳遞): anyone, while I hold a mark; anyone holding one, otherwise. */
+  private untouchable(me: Fighter): Fighter[] {
+    const { marking, mine, passTo, passFrom } = this.marks(me);
+    if (!marking) return [];
+    return this.fight.living().filter((q) => q.id !== me.id && q !== passTo && q !== passFrom && (!!mine || !!markOf(q)));
   }
 
   /** The way from the rest of the party through the boss and beyond: where to take something nasty. */
@@ -660,19 +837,33 @@ export class Bot {
     const bad = (this.fight.brain?.hazards() ?? []).filter(
       (h) => !h.on && h.aim !== me.id && AREA.has(h.shape.k) && (h.zone || (h.end >= t && h.end - t <= URGENT)) && !inside(h.shape, me.x, me.z),
     );
-    if (bad.length) {
+    // 判決傳遞: round anyone I must not touch
+    const keep = this.untouchable(me);
+    if (bad.length || keep.length) {
       const look = Math.min(d, 1.5);
-      const clear = (ax: number, az: number) => !bad.some((h) => inside(h.shape, me.x + ax * look, me.z + az * look));
+      // a few points along the way (the thin end of a beam lies between them); a lingering one with room to spare
+      const clear = (ax: number, az: number) =>
+        ![0.35, 0.7, 1].some((k) => bad.some((h) => (h.zone ? near : inside)(h.shape, me.x + ax * look * k, me.z + az * look * k))) &&
+        ![0.35, 0.7, 1].some((k) =>
+          keep.some((q) => {
+            const d = Math.hypot(me.x + ax * look * k - q.x, me.z + az * look * k - q.z);
+            return d < 1.8 && d < Math.hypot(me.x - q.x, me.z - q.z);
+          }),
+        );
       if (!clear(ux, uz)) {
-        for (const turn of [0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6]) {
+        let found = false;
+        for (const turn of [0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6, 2.2, -2.2]) {
           const c = Math.cos(turn);
           const sn = Math.sin(turn);
           const [vx, vz] = [ux * c - uz * sn, ux * sn + uz * c];
           if (clear(vx, vz)) {
             [ux, uz] = [vx, vz];
+            found = true;
             break;
           }
         }
+        // hemmed in by people I must not touch: wait rather than walk into one (unless standing in something)
+        if (!found && keep.length && !this.inDanger(me)) return;
       }
     }
     this.fight.move(this.id, me.x + ux * step, me.z + uz * step, Math.atan2(ux, uz), this.now);
@@ -691,8 +882,9 @@ export class Bot {
     const use = (slot: number, target: string | null = focus.id) => f.use(this.id, slot, { target }) === 'ok';
     const ready = (slot: number) => this.readyIn(me, slot) <= 0;
     const inMelee = reach(me.x, me.z, focus) <= 3;
-    // casts only when standing where it means to stay (right on it while something is coming)
-    const settled = Math.hypot(goal[0] - me.x, goal[1] - me.z) < (this.busy() ? 0.4 : 1.2);
+    // casts only when standing where it means to stay (close to it while something is coming: within a metre
+    // it does not hurry, so the cast is not cut short)
+    const settled = Math.hypot(goal[0] - me.x, goal[1] - me.z) < (this.busy() ? 0.9 : 1.2);
     const boss = f.brain?.foe ?? f.foes.find((e) => e.boss) ?? focus;
     const sec3 = 3 * TICK_RATE;
     const low = me.hp / f.maxHp(me) < 0.5;
@@ -709,22 +901,32 @@ export class Bot {
 
     if (me.role === 'tank') {
       const busterOnMe = boss.cast?.m === 'buster' && boss.cast.target === me.id;
-      const top = f.topOf(focus);
-      const cracked = (q: Fighter) => q.statuses.some((s) => s.id === 'crack');
+      // a fan aimed at me about to go off (噴焰): mitigate it like a buster
+      const fanOnMe = !!f.brain?.hazards().some((h) => h.aim === me.id && h.shape.k === 'cone' && h.end >= t && h.end - t <= sec(2.5));
+      // the boss I hold, even while my attacks go to its pair (the ultimate)
+      const held = focus.boss && f.brain?.staged ? boss : focus;
+      const top = f.topOf(held);
+      // 裂盾, or 水抗降低 (流體揮擊): the next buster goes to the other tank
+      const cracked = (q: Fighter) => q.statuses.some((s) => s.id === 'crack' || s.id === 'waterDown');
       // take the enemy back from a non-tank; on a tank buster with a crack, the other tank takes over
       const swap = top && top.id !== me.id && top.role === 'tank' && cracked(top) && !cracked(me) && focus === boss;
-      if (top && (top.role !== 'tank' || swap) && ready(1) && use(1)) return false;
+      if (top && (top.role !== 'tank' || swap) && ready(1) && use(1, held.id)) return false;
       // slot 2 is the short mitigation, slot 3 the big one (both tanks): the short one for a buster, the big
       // one for the second hit of a double buster that lands on me again (a lone tank)
       const has = (...ids: string[]) => me.statuses.some((s) => ids.includes(s.id));
+      // 流體揮擊 on me inside my 水抗降低 (no other tank took it): only the invulnerability keeps me up
+      const soaked = me.statuses.find((s) => s.id === 'waterDown');
+      if (busterOnMe && soaked && soaked.until > boss.cast!.end && boss.cast!.end - t <= sec(2) && !has('fortress', 'holmgang') && ready(3) && use(3, null)) return false;
       // a buster marker on me (the second hit follows whoever is top: after a swap, that is me)
       const marked = !!f.brain?.hazards().some((h) => h.color === 'r' && h.end - t <= sec3 && f.brain!.holder(h)?.id === me.id);
-      const second = (cracked(me) && f.topOf(boss)?.id === me.id) || (marked && !busterOnMe);
+      const second = (me.statuses.some((s) => s.id === 'crack') && f.topOf(boss)?.id === me.id) || (marked && !busterOnMe);
       const hurt = me.hp / f.maxHp(me) < 0.85;
-      // the big one just before the hit lands, so it still covers a second hit 4 s later
+      // the big one just before the hit lands, so it still covers a second hit 4 s later; where 流體揮擊 comes
+      // back inside its 水抗降低, the big one (an invulnerability) waits for that
       const soon = busterOnMe && boss.cast!.end - t <= sec(1.2);
-      if ((second || (soon && hurt)) && !has('fortress', 'holmgang') && ready(3) && use(3, null)) return false;
-      if ((busterOnMe || second) && !has('rampart', 'bloodlust', 'fortress', 'holmgang')) for (const s of [2, 3]) if (ready(s) && use(s, null)) return false;
+      const keepBig = this.soakFight();
+      if (!keepBig && (second || (soon && hurt)) && !has('fortress', 'holmgang') && ready(3) && use(3, null)) return false;
+      if ((busterOnMe || fanOnMe || second) && !has('rampart', 'bloodlust', 'fortress', 'holmgang')) for (const s of keepBig ? [2] : [2, 3]) if (ready(s) && use(s, null)) return false;
       // 守護之誓 / 熱血庇護 on whoever the buster is for: me on top of the other mitigation, or the other tank
       const busted = boss.cast?.m === 'buster' ? f.players.get(boss.cast.target ?? '') : undefined;
       if (busted && !busted.dead && ready(7) && !busted.statuses.some((s) => s.id === 'oath' || s.id === 'nascent') && use(7, busted.id)) return false;
@@ -732,7 +934,7 @@ export class Bot {
       if (me.job.id === 'berserker' && low && ready(9) && use(9, null)) return false;
       if (weave && inMelee && ready(8) && use(8, null)) return false;
       // back to the boss after being thrown out (not while dodging)
-      if (!inMelee && reach(me.x, me.z, focus) > 5 && !this.busy() && ready(6) && use(6)) return false;
+      if (!inMelee && held === focus && reach(me.x, me.z, focus) > 5 && !this.busy() && ready(6) && use(6)) return false;
       if (gcdLeft > 0) return false;
       if (me.job.id === 'berserker' && ready(4) && inMelee && use(4, null)) return false;
       // pick up adds: the guardian's circle when two are close, the berserker's axe at one that is on someone else
@@ -743,6 +945,7 @@ export class Bot {
       }
       if (inMelee) use(0);
       else if (me.job.id === 'guardian' && settled && reach(me.x, me.z, focus) <= 25) use(9);
+      else if (me.job.id === 'berserker' && reach(me.x, me.z, focus) <= 20) use(5, focus.id);
       return false;
     }
 
@@ -755,7 +958,9 @@ export class Bot {
       const avg = alive.reduce((n, q) => n + pct(q), 0) / Math.max(1, alive.length);
       const busted = boss.cast?.m === 'buster' ? alive.find((q) => q.id === boss.cast!.target) : undefined;
       const priest = me.job.id === 'priest';
-      if (pct(lowest) < 0.35 && priest && ready(3) && use(3, lowest.id)) return false;
+      // 窒息: healed to full before it runs out, or down they go
+      const choked = alive.filter((q) => q.statuses.some((s) => s.id === 'throttle')).sort((a, b) => pct(a) - pct(b))[0];
+      if (choked && priest && ready(3) && use(3, choked.id)) return false;
       if (busted && pct(busted) < 0.7 && priest && ready(3) && use(3, busted.id)) return false;
       if (!priest && avg < 0.8 && weave && ready(3) && use(3, null)) return false;
       // 晨光恩典 / 星輝 when the whole party is low
@@ -767,6 +972,8 @@ export class Bot {
       if (fallen && ready(4) && ready(5) && weave && use(5, null)) return false;
       if (gcdLeft > 0) return false;
       const swift = me.statuses.some((s) => s.id === 'swift');
+      // 窒息 does not wait for a quiet moment
+      if (choked && (settled || !this.busy())) return use(1, choked.id);
       if (!settled && !swift) {
         // moving: the instant damage-over-time is the one thing worth doing
         if (dotLow(priest ? 'sunBurn' : 'starRot') && reach(me.x, me.z, focus) <= 25) use(6);
@@ -887,6 +1094,21 @@ export class Bot {
     const soft = boss.statuses.some((s) => s.id === 'feint' || s.id === 'addle');
     return raidwide && !soft && ready(7) && reach(me.x, me.z, boss) <= 10 && use(7, boss.id);
   }
+
+  private soak: boolean | null = null;
+  /** The boss has busters that come back inside their own 水抗降低 (流體揮擊): the invulnerability is for those. */
+  private soakFight(): boolean {
+    const brain = this.fight.brain;
+    if (!brain) return false;
+    // the script changes with the stage: look again whenever it does
+    const s = brain.script;
+    if (this.soak === null || this.soakOf !== s) {
+      this.soakOf = s;
+      this.soak = s.phases.some((ph) => ph.entries.some((e) => e.mechs.some((m) => m.k === 'buster' && !!m.soak)));
+    }
+    return this.soak;
+  }
+  private soakOf: unknown = null;
 
   private readyIn(me: Fighter, slot: number): number {
     return me.ready[slot]! - this.fight.tick;

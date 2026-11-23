@@ -1,8 +1,8 @@
 /**
- * The first 4 duties (section 七 of the design doc). Each has a Normal and a Hard version; the 8
- * combinations are what players vote on in the waiting room. Times are in seconds.
+ * The duties (section 七 of the design doc): the first 4 have a Normal and a Hard version, the ultimate
+ * (v0.7) only its own 絕; these 9 options are what players vote on in the waiting room. Times are in seconds.
  */
-export type EncounterId = 'colossus' | 'frostwitch' | 'gatekeeper' | 'twins';
+export type EncounterId = 'colossus' | 'frostwitch' | 'gatekeeper' | 'twins' | 'ultimate';
 
 /** circle: `size` is the radius; square: `size` is half the side. Metres. */
 export interface Arena {
@@ -26,7 +26,8 @@ export interface DifficultyTimes {
 export interface Encounter {
   id: EncounterId;
   name: string;
-  kind: 'trial' | 'raid';
+  /** ultimate: one difficulty (絕), stages one after another, at least 4 players with 1 tank, 1 healer and 2 DPS */
+  kind: 'trial' | 'raid' | 'ultimate';
   boss: string;
   arena: Arena;
   learn: string;
@@ -35,9 +36,11 @@ export interface Encounter {
   /** boss HP for the 4-player baseline (1 tank, 1 healer, 2 DPS); scaled by the party (shared/party.ts). 暫定 */
   hp: { normal: number; hard: number };
   theme: { sky: string; floor: string; floorLine: string; edge: string; outside: string };
+  /** the ultimate's stages, in order (the boss script has one for each) */
+  stages?: readonly string[];
 }
 
-export const KIND_NAMES = { trial: '討滅戰', raid: 'Raid' } as const;
+export const KIND_NAMES = { trial: '討滅戰', raid: 'Raid', ultimate: '絕本' } as const;
 
 export const ENCOUNTERS: readonly Encounter[] = [
   {
@@ -102,29 +105,48 @@ export const ENCOUNTERS: readonly Encounter[] = [
     hp: { normal: 1_050_000, hard: 1_220_000 },
     theme: { sky: '#2b2440', floor: '#4b4466', floorLine: '#8e83b8', edge: '#2a2338', outside: '#1c1828' },
   },
+  {
+    id: 'ultimate',
+    name: '時律機神殿',
+    kind: 'ultimate',
+    boss: '水銀核心、熾核與凍核',
+    arena: { shape: 'circle', size: 22 },
+    learn: '多王接力、血量平衡、碰觸傳遞、數字點名',
+    desc: '發條城塞的頂層。王一組接一組上場，每個階段有自己的狂暴；滅團就從頭來。v0.7 開放 P1、數字裁斷與 P2。',
+    // each stage has its own enrage (P1 2:45, P2 3:15 after the 35 s of 數字裁斷): the most a fight can last
+    times: { normal: { target: 330, enrage: 395 }, hard: { target: 330, enrage: 395 } },
+    hp: { normal: 1_150_000, hard: 1_150_000 },
+    theme: { sky: '#1f1b2e', floor: '#5d5246', floorLine: '#c9a45c', edge: '#2f2820', outside: '#14111c' },
+    stages: ['P1：水銀核心', '數字裁斷', 'P2：熾核與凍核'],
+  },
 ];
 
 export function encounterById(id: EncounterId): Encounter {
   return ENCOUNTERS.find((e) => e.id === id)!;
 }
 
-/** What players vote on: one of 8 options, encounter × difficulty. Index = encounter * 2 + (hard ? 1 : 0). */
+/** What players vote on: encounter × difficulty (the ultimate has only its 絕, which counts as Hard). */
 export interface VoteOption {
   index: number;
   enc: EncounterId;
   hard: boolean;
 }
 
-export const VOTE_OPTIONS: readonly VoteOption[] = ENCOUNTERS.flatMap((e, k) => [
-  { index: k * 2, enc: e.id, hard: false },
-  { index: k * 2 + 1, enc: e.id, hard: true },
-]);
+export const VOTE_OPTIONS: readonly VoteOption[] = ENCOUNTERS.flatMap((e) => (e.kind === 'ultimate' ? [true] : [false, true]).map((hard) => ({ enc: e.id, hard }))).map(
+  (o, index) => ({ index, ...o }),
+);
 
-export const difficultyName = (hard: boolean) => (hard ? 'Hard' : 'Normal');
+/** The vote option for a duty and difficulty (the ultimate's one whatever `hard` says). */
+export function voteOption(enc: EncounterId, hard: boolean): VoteOption {
+  const ult = encounterById(enc).kind === 'ultimate';
+  return VOTE_OPTIONS.find((o) => o.enc === enc && (ult || o.hard === hard))!;
+}
+
+export const difficultyName = (hard: boolean, enc?: EncounterId) => (enc && encounterById(enc).kind === 'ultimate' ? '絕' : hard ? 'Hard' : 'Normal');
 
 export function optionLabel(index: number): string {
   const o = VOTE_OPTIONS[index];
-  return o ? `${encounterById(o.enc).name} ${difficultyName(o.hard)}` : '';
+  return o ? `${encounterById(o.enc).name} ${difficultyName(o.hard, o.enc)}` : '';
 }
 
 /** "4:00" */

@@ -192,6 +192,8 @@ export interface Snapshot {
   tg?: SnapTele[];
   /** the arena's pillars that have shattered */
   pb?: number[];
+  /** the ultimate: [stage, ticks into it, its enrage in seconds (0: an intermission)] */
+  sg?: [number, number, number];
   ev?: FightEvent[];
 }
 
@@ -214,8 +216,10 @@ export interface GameResult {
   reason: EndReason;
   /** seconds of fighting */
   time: number;
-  /** boss HP left, 0–1 */
+  /** boss HP left, 0–1 (the ultimate: of the stage it ended in) */
   bossHp: number;
+  /** the ultimate: the stage it ended in */
+  stage?: number;
   stats: PlayerStats[];
 }
 

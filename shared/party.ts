@@ -1,3 +1,4 @@
+import { VOTE_OPTIONS, encounterById } from './encounters';
 import { DEFAULT_JOB_ORDER, jobById, type JobId, type Role } from './jobs';
 
 /** At most 2 tanks, 2 healers and 4 DPS; the same job may be taken twice within those limits. */
@@ -42,14 +43,43 @@ export function roleHasRoom(others: readonly JobId[], job: JobId): boolean {
  * The offline practice party: my job, then computer players the way a room hands out jobs (one of each
  * role first, then the next free job), within the role caps.
  */
-export function practiceParty(myJob: JobId, n: number): JobId[] {
+export function practiceParty(myJob: JobId, n: number, ultimate = false): JobId[] {
   const jobs: JobId[] = [myJob];
+  if (ultimate) {
+    // the ultimate: at least 4, the missing tank, healer and DPS first
+    n = Math.max(4, n);
+    const want: [Role, number][] = [
+      ['tank', 1],
+      ['healer', 1],
+      ['dps', 2],
+    ];
+    for (const [role, k] of want) {
+      while (roleCounts(jobs)[role] < k) {
+        const next = DEFAULT_JOB_ORDER.find((j) => jobById(j).role === role && !jobs.includes(j)) ?? DEFAULT_JOB_ORDER.find((j) => jobById(j).role === role);
+        jobs.push(next!);
+      }
+    }
+  }
   while (jobs.length < n) {
     const next = DEFAULT_JOB_ORDER.find((j) => !jobs.includes(j) && roleHasRoom(jobs, j)) ?? DEFAULT_JOB_ORDER.find((j) => roleHasRoom(jobs, j));
     if (!next) break;
     jobs.push(next);
   }
   return jobs;
+}
+
+/** The ultimate (時律機神殿) needs at least 4 players with at least 1 tank, 1 healer and 2 DPS. */
+export const ULTIMATE_NEEDS = '至少 4 人，而且要有 1 坦 1 補 2 DPS';
+
+export function meetsUltimate(jobs: readonly JobId[]): boolean {
+  const n = roleCounts(jobs);
+  return jobs.length >= 4 && n.tank >= 1 && n.healer >= 1 && n.dps >= 2;
+}
+
+/** May this party play vote option k? (the ultimate's requirement; every other option is always open) */
+export function optionOpen(k: number, jobs: readonly JobId[]): boolean {
+  const o = VOTE_OPTIONS[k];
+  return !!o && (encounterById(o.enc).kind !== 'ultimate' || meetsUltimate(jobs));
 }
 
 /** What the missing-role rules (缺角補正) will do for this party, for the waiting room. */

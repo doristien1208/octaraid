@@ -1,5 +1,5 @@
 import { TICK_MS, TICK_RATE } from '../shared/constants';
-import { ENCOUNTERS } from '../shared/encounters';
+import { ENCOUNTERS, difficultyName } from '../shared/encounters';
 import { DEFAULT_JOB_ORDER, isJobId, jobById, type JobId } from '../shared/jobs';
 import { hpScale, practiceParty } from '../shared/party';
 import type { C2S, GameStartInfo } from '../shared/protocol';
@@ -10,14 +10,15 @@ import { clear, store } from './dom';
 import { GameView } from './game/view';
 
 /**
- * Offline practice, no room needed: ?sandbox&boss=0..3&hard&n=1..8&job=guardian&dummy&calm&lb&skip=90&until=岩牢
+ * Offline practice, no room needed: ?sandbox&boss=0..4&hard&n=1..8&job=guardian&dummy&calm&lb&skip=90&until=岩牢&stage=0..2
  * (the entry screen's 離線練習 opens the menu in ui/practice.ts, which builds this address).
  * The fight runs in this browser with the same rules as the server. Computer players fill the rest of
  * the party (role caps apply), read the boss's attacks and play their rotations. dummy: the training
  * dummy instead of the duty's boss; calm: a dummy that does not attack, for measuring damage; lb: the
  * Limit Break gauge starts full; skip: a computer player plays my character for the first that many seconds,
  * then it is mine (to practise a later part of the fight); until: the same, up to when the boss starts
- * casting the move of that name. ?sandbox&gallery lines all 9 jobs up facing the camera, to compare their
+ * casting the move of that name; stage (the ultimate, boss=4): start from that stage (0 P1, 1 數字裁斷, 2 P2),
+ * the party filled to at least 1 tank, 1 healer and 2 DPS. ?sandbox&gallery lines all 9 jobs up facing the camera, to compare their
  * looks (&shot: without the HUD, for a group picture such as the hub thumbnail).
  */
 export function startSandbox(app: HTMLElement, audio: Audio): void {
@@ -28,18 +29,21 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
     return raw !== null && raw !== '' && Number.isInteger(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
   };
   const enc = ENCOUNTERS[int('boss', 0, ENCOUNTERS.length - 1, 0)]!;
-  const hard = q.has('hard');
+  const ultimate = enc.kind === 'ultimate';
+  const hard = q.has('hard') || ultimate;
+  // the ultimate: the stage to start from (0: P1)
+  const stage = ultimate ? int('stage', 0, (enc.stages?.length ?? 1) - 1, 0) : 0;
   const calm = q.has('calm');
   const gallery = q.has('gallery');
   const dummy = q.has('dummy') || calm || gallery;
-  const n = gallery ? 8 : int('n', 1, 8, 4);
+  const n = gallery ? 8 : int('n', ultimate ? 4 : 1, 8, 4);
   const jobParam = q.get('job');
   const myJob: JobId = isJobId(jobParam) ? jobParam : 'guardian';
-  const jobs: JobId[] = gallery ? [myJob, ...DEFAULT_JOB_ORDER.filter((j) => j !== myJob)] : practiceParty(myJob, n);
+  const jobs: JobId[] = gallery ? [myJob, ...DEFAULT_JOB_ORDER.filter((j) => j !== myJob)] : practiceParty(myJob, n, ultimate && !dummy);
   const roster = jobs.map((job, k) => (k === 0 ? { id: 'me', name: store.get('octaraid.name') || '你', job } : { id: `bot${k}`, name: `電腦${k}`, job }));
   const seed = Math.floor(Math.random() * 2 ** 31);
   const scale = hpScale(jobs);
-  const fight = new Fight(enc, hard, roster, seed, { hpScale: scale, calm: calm || gallery, practice: dummy });
+  const fight = new Fight(enc, hard, roster, seed, { hpScale: scale, calm: calm || gallery, practice: dummy, stage });
   if (gallery) {
     // two rows of four south of the dummy, everyone facing the camera: tanks and healers behind, DPS in front
     roster.forEach((r) => {
@@ -102,7 +106,7 @@ export function startSandbox(app: HTMLElement, audio: Audio): void {
   if (gallery && q.has('shot')) game.showcase(0.3, 6.6);
   game.addChat(
     '',
-    `離線練習：${enc.name}${hard ? ' Hard' : ''}，${roster.length} 人，對手是${fight.foes[0]?.name ?? ''}${calm ? '（不攻擊）' : ''}；電腦隊友會自己走位與出招。按「結束測試」或時間到就結束。`,
+    `離線練習：${enc.name}${hard || ultimate ? ` ${difficultyName(hard, enc.id)}` : ''}${ultimate && stage ? `（從${enc.stages?.[stage] ?? ''}開始）` : ''}，${roster.length} 人，對手是${fight.brain?.foe.name ?? fight.foes[0]?.name ?? ''}${calm ? '（不攻擊）' : ''}；電腦隊友會自己走位與出招。按「結束測試」或時間到就結束。`,
   );
 
   let lbFill = q.has('lb');

@@ -4,6 +4,7 @@ import { colossus } from './colossus';
 import { frostwitch } from './frostwitch';
 import { gatekeeper } from './gatekeeper';
 import { twins } from './twins';
+import { ultimate } from './ultimate';
 
 /** The boss script of each duty (the training dummy, shared/sim/practice.ts, stands in where there is none). */
 const SCRIPTS: Partial<Record<EncounterId, (hard: boolean) => BossScript>> = {
@@ -11,6 +12,7 @@ const SCRIPTS: Partial<Record<EncounterId, (hard: boolean) => BossScript>> = {
   frostwitch,
   gatekeeper,
   twins,
+  ultimate,
 };
 
 export function scriptFor(enc: EncounterId, hard: boolean): BossScript | null {

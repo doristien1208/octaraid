@@ -634,6 +634,43 @@ p {
   cursor: default;
 }
 
+/* the ultimate (v0.7): one difficulty across both columns, shut while the party does not qualify */
+.kind.ultimate {
+  background: #2a2238;
+  color: #f0c86a;
+}
+
+.vote-btn.ultimate {
+  grid-column: span 2;
+  border-color: #5b4a7a;
+  background: linear-gradient(100deg, #fff 55%, #f4ecff);
+}
+
+.vote-btn.ultimate .diff {
+  color: #6b2fb3;
+  letter-spacing: 0.2em;
+}
+
+.vote-btn.ultimate.on {
+  border-color: var(--primary);
+  background: #fff4e3;
+}
+
+.vote-btn.shut {
+  opacity: 0.55;
+}
+
+.practice-stages {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.practice-stages[hidden] {
+  display: none;
+}
+
 .chat-log {
   height: 120px;
   overflow-y: auto;

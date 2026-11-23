@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FOES, type FoeKind } from '../../shared/bosses/foes';
 import { Bipolar, Drone, Ember, Frost, Frostwitch, Gatekeeper, Mirror } from './bosses4';
+import { Doll, Hand, IceBlock, Liquid } from './bosses7';
 import { FoeBase, rock, type FoeView } from './foebase';
 import { Dummy, box, cone, cyl, mesh, toonGradient } from './models';
 
@@ -201,5 +202,13 @@ export function makeFoe(kind: FoeKind): FoeView {
       return new Frost();
     case 'bipolar':
       return new Bipolar();
+    case 'liquid':
+      return new Liquid();
+    case 'hand':
+      return new Hand();
+    case 'doll':
+      return new Doll();
+    case 'iceblock':
+      return new IceBlock();
   }
 }

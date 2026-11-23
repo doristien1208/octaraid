@@ -1,4 +1,4 @@
-import { RULES, sec } from '../constants';
+import { RULES, TICK_RATE as TICK_RATE_HZ, sec } from '../constants';
 import type { FoeKind } from '../bosses/foes';
 import type { FightEvent } from '../protocol';
 import { clampToArena, faceTowards } from './arena';
@@ -24,13 +24,21 @@ export type MechDef = Src &
      * the top of the enmity list takes it (rank 2: the second, e.g. 凍核's half of 雙死刑); with 2 hits the
      * second goes to whoever is top then (tank swap)
      */
-    | { k: 'buster'; dmg: number; hits?: number; gap?: number; rank?: number }
+    | {
+        k: 'buster';
+        dmg: number;
+        hits?: number;
+        gap?: number;
+        rank?: number;
+        /** 流體揮擊: it leaves 水抗降低 for this many seconds; hit again while it lasts, all of the HP goes (swap, or 不動要塞 / 死戰) */
+        soak?: number;
+      }
     /** a circle around the boss (鋼鐵): get out */
     | { k: 'chariot'; r: number; dmg: number; delay?: number }
     /** everything but a circle around the boss (月環): get in */
     | { k: 'donut'; r0: number; dmg: number; delay?: number }
-    /** a fan in front of the boss, aimed when the cast starts */
-    | { k: 'cone'; deg: number; dmg: number }
+    /** a fan in front of the boss, aimed when the cast starts; top: at the top of the enmity list (the tank), theirs to take, turning after them (噴焰) */
+    | { k: 'cone'; deg: number; dmg: number; top?: boolean }
     /** random circles in waves; nearBoss puts that many of the first wave next to the boss and the rest of that wave out of the middle */
     | { k: 'rocks'; r: number; dmg: number; count: number; waves: number; gap: number; nearBoss?: number }
     /** parallel strips across the arena at these offsets from the centre, one wave after another */
@@ -53,21 +61,37 @@ export type MechDef = Src &
      * adds: kill them within `time` or each one left explodes for `boom`; together: the first to fall gets up
      * again unless the rest follow within 10 s; attack: what each one does meanwhile
      */
-    | { k: 'adds'; kind: FoeKind; at: [number, number][]; hp: number; auto: number; time: number; boom: number; together?: boolean | number; attack?: AddAttack }
+    | {
+        k: 'adds';
+        kind: FoeKind;
+        at: [number, number][];
+        hp: number;
+        auto: number;
+        time: number;
+        boom: number;
+        together?: boolean | number;
+        attack?: AddAttack;
+        /** each one starts on a different marked player (not a tank) and stays on them (獵殺人偶) */
+        onPlayers?: boolean;
+        /** they cannot be killed: their HP stops at 1 */
+        floor?: boolean;
+        /** walked into the boss's (or its twin's) ring at `pct` of their HP or less, they are absorbed for `dmg` on everyone; above that, `fail` */
+        feed?: { pct: number; dmg: number; fail: number };
+      }
     /** the boss leaps (to a point, during the last second of the cast); land: a circle where it comes down */
     | { k: 'jump'; to?: [number, number]; land?: { r: number; dmg: number } }
     /** pairs of players tied together: be at least `dist` apart when it ends (寒冰鎖鏈) */
     | { k: 'tether'; pairs: number; dist: number; dmg: number }
     /** towers (`count` for 4 players, scaled): `need` people in each when they go off, or they blow up on everyone */
-    | { k: 'tower'; count: number; need: number; r: number; dmg: number; fail: number; ring?: number }
+    | { k: 'tower'; count: number; need: number; r: number; dmg: number; fail: number; ring?: number; exact?: boolean }
     /** exaflares: circles rolling across the arena in lanes, one step every `gap` seconds, every other lane the other way */
     | { k: 'exaflare'; lanes: number; r: number; step: number; gap: number; dmg: number }
     /** line of sight (視線遮蔽): hide behind a pillar; kill: down instead of damage; shatter: a pillar hidden behind breaks */
     | { k: 'los'; dmg: number; kill?: boolean; shatter?: boolean }
     /** freeze check (深度凍結): whoever moves when it ends is frozen for `time`; then circles drop on everyone */
     | { k: 'freeze'; time: number; drop?: { r: number; dmg: number; delay: number } }
-    /** protean (八方扇形): a fan from the boss at every player; anyone in someone else's fan is hit twice */
-    | { k: 'protean'; deg: number; dmg: number; delay?: number }
+    /** protean (八方扇形): a fan from the boss at every player; anyone in someone else's fan is hit twice; again: the same fans once more that many seconds later, unmarked (擴散波) */
+    | { k: 'protean'; deg: number; dmg: number; delay?: number; again?: number }
     /** timed bombs: batches going off these many seconds after the cast; each blows up `r` around its holder; pool: and leaves one where it went off */
     | { k: 'bombs'; at: number[]; count: number | 'all'; r: number; dmg: number; self: number; pool?: { r: number; dmg: number; time: number } }
     /** the floor's tiles live in a checkerboard: these patterns one after the other, `gap` apart; tele: warning, s */
@@ -95,10 +119,32 @@ export type MechDef = Src &
     | { k: 'drop'; r: number; dmg: number; delay: number; after?: number }
     /** the fans the adds of this fight fired, again from where they stood, in the order they first fired, `gap` apart (鏡中預言) */
     | { k: 'replay'; gap: number; dmg: number }
+    /** the boss and its twin (水銀之手) must have HP shares within `gap` of each other when it goes off, or `dmg` hits everyone (痛苦之手) */
+    | { k: 'balance'; gap: number; dmg: number }
+    /** the boss must end up within `dist` m of its twin's ring (near: 合掌) or at least that far (握拳), or `dmg` hits everyone */
+    | { k: 'pose'; near: boolean; dist: number; dmg: number }
+    /** pools in three quadrants (cardinal or intercardinal, one left dry at random) for `time` s, `dmg` a second to whoever stands in one (漩渦) */
+    | { k: 'quadrants'; dmg: number; time: number }
+    /** `count` players (for 4; DPS first, never tanks) drop to half their HP and must be healed to full within `time` s, or they go down (窒息) */
+    | { k: 'throttle'; count: number; time: number }
+    /** orbs drifting from the edge to where the boss stands as it is cast, a step of `step` m every `gap` s; a step on a player hits them, the last one on the boss hits everyone (栓塞) */
+    | { k: 'embolus'; count: number; r: number; step: number; gap: number; dmg: number }
+    /** two opposite circles of `r` at `dist` m from the middle (by the edge), going round `turn` degrees clockwise every `gap` s, `steps` times, each shown `tele` s ahead (鷹爆) */
+    | { k: 'rotor'; r: number; dist: number; steps: number; gap: number; turn: number; dmg: number; tele: number }
+    /** 判決傳遞: two players hold α and β (a mark passes on to whoever its holder touches; α touching β takes both down); two others must hold α and β when `check` s are up (宣判) */
+    | { k: 'nisi'; check: number; dot: number }
+    /** 壓縮水 on a healer (3 or more share it) and 壓縮雷 on a DPS (exactly 2), going off in turn `gap` s apart, `rounds` each; each passes on to someone else in its stack who has not held it */
+    | { k: 'compressed'; rounds: number; gap: number; dmg: number }
+    /** the boss leaps onto the furthest player (a circle of r: theirs to take), then a beam `beam.w` m wide from there through the middle lingers `beam.time` s (超級跳躍、啟示光線) */
+    | { k: 'superjump'; r: number; dmg: number; beam: { w: number; time: number } }
+    /** an ice block rises somewhere for `time` s: a pillar to hide behind (冰塊) */
+    | { k: 'iceblock'; time: number }
+    /** the caster shields itself: only hits from in front of it wear the shield (`hp`) down; still up after `time` s, `dmg` on everyone (電漿護盾) */
+    | { k: 'plasma'; hp: number; time: number; dmg: number }
     /** another mechanic going off `after` seconds later than the cast ends (its telegraph still shows ahead as usual) */
     | { k: 'later'; after: number; mech: MechDef }
-    /** one of these, chosen at random when the cast begins */
-    | { k: 'either'; of: MechDef[] }
+    /** one of these, chosen at random when the cast begins; names: the cast bar's name for each (合掌 / 握拳) */
+    | { k: 'either'; of: MechDef[]; names?: string[] }
   );
 
 /** What adds do while they live. */
@@ -106,7 +152,9 @@ export type AddAttack =
   /** a fan in front of each add every `every` seconds (the adds take turns) */
   | { k: 'cone'; deg: number; r: number; dmg: number; every: number; first: number }
   /** a strip from the add through a random player; puddle: it leaves a pool on that spot */
-  | { k: 'shot'; w: number; dmg: number; every: number; first: number; puddle?: { r: number; dmg: number; time: number } };
+  | { k: 'shot'; w: number; dmg: number; every: number; first: number; puddle?: { r: number; dmg: number; time: number } }
+  /** a burst of r around the add, which stops to charge it; hit twice within 20 s (以太) is down (排氣) */
+  | { k: 'exhaust'; r: number; dmg: number; every: number; first: number };
 
 export interface Entry {
   /** seconds into the phase when the cast starts */
@@ -144,11 +192,26 @@ export interface Twin {
   /** where it starts; the boss starts in the middle */
   at: [number, number];
   /** 共鳴: closer than `dist` when checked (every `every` s), both power up 10% a stack */
-  resonance: { dist: number; every: number };
+  resonance?: { dist: number; every: number };
   /** 失衡: HP shares further apart than `gap`, a raid-wide every `every` s */
-  imbalance: { gap: number; every: number; dmg: number };
+  imbalance?: { gap: number; every: number; dmg: number };
   /** 合體: both down to `at` of their HP, they merge into `kind`; the first one there takes no more damage */
-  fuse: { at: number; kind: FoeKind };
+  fuse?: { at: number; kind: FoeKind };
+  /** both must fall: the one left standing this many seconds after the other wipes the party */
+  together?: number;
+  /** its share of the HP (the rest is the boss's); half by default */
+  share?: number;
+}
+
+/** One part of a duty fought in turn (the ultimate): its own bosses, timeline and enrage. */
+export interface Stage {
+  script: BossScript;
+  /** this stage's share of the duty's HP; 0 for an intermission */
+  hp: number;
+  /** an intermission: its boss cannot be hurt, and it moves on after this many seconds */
+  time?: number;
+  /** its enrage cast ends the fight this many seconds into the stage */
+  enrageAt?: number;
 }
 
 export interface BossScript {
@@ -172,6 +235,8 @@ export interface BossScript {
    * was healed through, and two healers never lost anyone to a mechanic)
    */
   lethal?: boolean;
+  /** the ultimate (v0.7): stages fought one after another; the fight is won when the last one's bosses fall */
+  stages?: Stage[];
 }
 
 /** A shape on the ground (or a marker over a head) that players can see, until it hits. */
@@ -194,6 +259,8 @@ export interface Tele {
   zone?: boolean;
   /** a stack for exactly its count (分攤死刑): nobody else should join */
   exact?: boolean;
+  /** a stack that moves on to someone in it afterwards (壓縮水、壓縮雷) */
+  pass?: boolean;
   /** players see it only until this tick, though it still goes off at `end` (an attack to remember) */
   hideAt?: number;
 }
@@ -258,6 +325,8 @@ export class BossBrain {
   private together = false;
   private reviveAt = 0;
   private addAttack: AddAttack | null = null;
+  /** the current adds are fed to the boss (獵殺人偶) */
+  feed: { pct: number; dmg: number; fail: number } | null = null;
   private addNext = new Map<string, number>();
   private addTurn = 0;
   /** players a sweeping beam hit last (they are not hit again by it for a second) */
@@ -270,24 +339,149 @@ export class BossBrain {
   private togetherTicks = sec(10);
   /** each add's first fan, in the order they fired (鏡中預言 fires them again) */
   private echoes: { id: string; shape: Shape }[] = [];
+  /** the script being played: the duty's, or the current stage's (the ultimate) */
+  script: BossScript;
+  /** the ultimate's stages (null for a single boss) */
+  private readonly stages: Stage[] | null;
+  /** which stage is on (−1 before the first) */
+  stageIndex = -1;
+  private stageStart = 0;
+  /** the duty's HP, shared out between the stages */
+  private readonly totalHp: number;
+  private won = false;
+  /** a twin that must fall with the other one went down at this tick (0: both up) */
+  private oneDownAt = 0;
+  /** the tick this brain last stepped (the fight steps it itself once its boss is down) */
+  stepped = -1;
+  /** 判決傳遞 runs until this tick */
+  private nisiUntil = 0;
+  /** ice blocks standing (冰塊): pillars for line of sight */
+  private blocks: Foe[] = [];
+  /** 合掌 / 握拳 to come: where the core must be when it goes off (computer tanks drag it there) */
+  pose: { near: boolean; dist: number; at: number } | null = null;
+  /** 栓塞: where the orbs are heading, until the last of them gets there (keep the boss away) */
+  avoid: { x: number; z: number; r: number; until: number } | null = null;
 
   constructor(
     private readonly fight: Fight,
     foe: Foe,
-    readonly script: BossScript,
+    script: BossScript,
+    /** the ultimate: start from this stage (offline practice) */
+    startStage = 0,
   ) {
     this.foe = foe;
-    const tw = script.twin;
-    if (tw) {
-      // the duty's HP is for both together
-      const half = Math.round(foe.maxHp / 2);
-      foe.maxHp = foe.hp = half;
-      foe.minHp = Math.round(half * tw.fuse.at);
-      this.twin = fight.spawnFoe(tw.kind, tw.at[0], tw.at[1], half, { id: 'twin' });
-      this.twin.aloof = true;
-      this.twin.minHp = Math.round(half * tw.fuse.at);
-      this.twin.f = faceTowards(tw.at[0], tw.at[1], 0, 0);
+    this.script = script;
+    this.totalHp = foe.maxHp;
+    this.stages = script.stages?.length ? script.stages : null;
+    if (this.stages) {
+      this.enterStage(Math.max(0, Math.min(startStage, this.stages.length - 1)), foe);
+      return;
     }
+    if (script.twin) this.spawnTwin(script.twin, 'twin');
+  }
+
+  /** The second boss: its share of the duty's HP comes off the boss's. */
+  private spawnTwin(tw: Twin, id: string): void {
+    const foe = this.foe;
+    const share = tw.share ?? 0.5;
+    const total = foe.maxHp;
+    const mine = Math.round(total * (1 - share));
+    foe.maxHp = foe.hp = mine;
+    if (tw.fuse) foe.minHp = Math.round(mine * tw.fuse.at);
+    const twin = this.fight.spawnFoe(tw.kind, tw.at[0], tw.at[1], total - mine, { id });
+    twin.aloof = true;
+    if (tw.fuse) twin.minHp = Math.round(twin.maxHp * tw.fuse.at);
+    twin.f = faceTowards(tw.at[0], tw.at[1], 0, 0);
+    for (const p of this.fight.players.values()) twin.enmity.set(p.id, 0);
+    this.twin = twin;
+  }
+
+  /**
+   * The ultimate moves on to stage k: whatever was left of the last one goes, its boss comes in with its
+   * share of the duty's HP (an intermission's cannot be hurt), the tanks first on its list. `reuse` is the
+   * boss the fight made at the start.
+   */
+  private enterStage(k: number, reuse?: Foe): void {
+    const f = this.fight;
+    const st = this.stages![k]!;
+    this.stageIndex = k;
+    this.stageStart = f.tick;
+    this.pending = [];
+    this.puddles = [];
+    this.adds = [];
+    this.addsSummoned = false;
+    this.addAttack = null;
+    this.blocks = [];
+    this.pose = null;
+    this.avoid = null;
+    this.nisiUntil = 0;
+    this.oneDownAt = 0;
+    this.enraging = false;
+    this.twin = null;
+    for (const e of f.foes) if (!e.gone && e !== reuse) f.despawn(e);
+    for (const q of f.players.values()) q.statuses = q.statuses.filter((x) => !STAGE_MARKS.has(x.id));
+    this.script = st.script;
+    const hp = Math.max(1, Math.round(this.totalHp * (st.hp || 0.05)));
+    let boss = reuse;
+    if (boss && boss.kind === st.script.kind) {
+      boss.maxHp = boss.hp = hp;
+    } else {
+      if (boss) f.despawn(boss);
+      boss = f.spawnFoe(st.script.kind, 0, 0, hp, { id: `boss${k}`, auto: st.script.auto });
+      for (const p of f.players.values()) boss.enmity.set(p.id, p.role === 'tank' ? RULES.enmityTankStart : 0);
+      boss.autoAt = f.tick + sec(3);
+    }
+    boss.auto = st.script.auto;
+    boss.untargetable = st.time !== undefined;
+    this.foe = boss;
+    if (st.script.twin) this.spawnTwin(st.script.twin, `twin${k}`);
+    this.phase = -1;
+    this.shift = 0;
+    this.next = 0;
+  }
+
+  /** This stage is over: an intermission's time is up, or its bosses (the twin too when both must fall) are down. */
+  private stageDone(): boolean {
+    const st = this.stages![this.stageIndex]!;
+    if (st.time !== undefined) return this.fight.tick - this.stageStart >= sec(st.time);
+    const both = st.script.twin?.together !== undefined;
+    return this.foe.hp <= 0 && (!both || !this.twin || this.twin.hp <= 0);
+  }
+
+  /** The duty is won: the boss (or, the ultimate, the last stage's bosses) has fallen; two that must fall together, both. */
+  cleared(): boolean {
+    if (this.stages) return this.won;
+    const both = this.script.twin?.together !== undefined && !!this.twin;
+    return this.foe.hp <= 0 && (!both || this.twin!.hp <= 0);
+  }
+
+  /** Ticks until the enrage lands: the duty's clock, or the current stage's (the ultimate). */
+  private enrageLeft(): number {
+    const f = this.fight;
+    if (!this.stages) return f.enrageTicks - f.fightTicks;
+    const at = this.stages[this.stageIndex]?.enrageAt;
+    return at === undefined ? Number.MAX_SAFE_INTEGER : this.stageStart + sec(at) - f.tick;
+  }
+
+  /** A stage's enrage has gone off (the ultimate): the fight ends. */
+  enraged(): boolean {
+    return !!this.stages && this.enrageLeft() <= 0;
+  }
+
+  /** Seconds into the current stage (the ultimate). */
+  get stageTime(): number {
+    return (this.fight.tick - this.stageStart) / TICK_RATE_HZ;
+  }
+
+  /** The ultimate is played in stages. */
+  get staged(): boolean {
+    return !!this.stages;
+  }
+
+  /** For the HUD: [stage, ticks into it, its enrage in seconds (0: an intermission, which shows its length)]. */
+  stageClock(): [number, number, number] {
+    const st = this.stages?.[this.stageIndex];
+    return [Math.max(0, this.stageIndex), this.fight.tick - this.stageStart, st ? (st.enrageAt ?? 0) : 0];
   }
 
   get current(): Phase | undefined {
@@ -325,11 +519,34 @@ export class BossBrain {
    * 熾核 the point across the arena from 凍核, far enough that they do not resonate.
    */
   home(foe: Foe): [number, number] {
+    const h = this.homeFor(foe);
+    const a = this.avoid;
+    if (!a || foe !== this.foe || this.fight.tick > a.until) return h;
+    const d = Math.hypot(h[0] - a.x, h[1] - a.z);
+    if (d >= a.r) return h;
+    // 栓塞: out of the way of the orbs, away from where they are heading (towards the middle if it is right there)
+    const c = Math.hypot(a.x, a.z);
+    const [ux, uz] = d > 0.1 ? [(h[0] - a.x) / d, (h[1] - a.z) / d] : c > 0.1 ? [-a.x / c, -a.z / c] : [0, 1];
+    return clampToArena(this.fight.enc.arena, a.x + ux * a.r, a.z + uz * a.r, foe.r);
+  }
+
+  private homeFor(foe: Foe): [number, number] {
     const size = this.fight.enc.arena.size;
-    if (this.twin && foe === this.foe) {
-      const d = Math.hypot(this.twin.x, this.twin.z);
-      if (d > 1) return [(-this.twin.x / d) * size * 0.4, (-this.twin.z / d) * size * 0.4];
+    const tw = this.twin;
+    if (tw && foe === this.foe && this.script.twin?.resonance) {
+      const d = Math.hypot(tw.x, tw.z);
+      if (d > 1) return [(-tw.x / d) * size * 0.4, (-tw.z / d) * size * 0.4];
       return [0, size * 0.4];
+    }
+    // 合掌: the core next to its hand; 握拳: across the arena from it
+    if (tw && foe === this.foe && this.pose && this.fight.tick <= this.pose.at) {
+      const d = Math.hypot(tw.x, tw.z) || 1;
+      const [ux, uz] = [tw.x / d, tw.z / d];
+      if (this.pose.near) {
+        const c = foe.r + tw.r + Math.max(1, this.pose.dist - 3);
+        return [tw.x - ux * c, tw.z - uz * c];
+      }
+      return [-ux * size * 0.6, -uz * size * 0.6];
     }
     return this.current?.home ?? [0, 0];
   }
@@ -338,24 +555,75 @@ export class BossBrain {
 
   step(): void {
     const f = this.fight;
-    if (this.phase < 0) this.enter(0);
-    if (this.foe.hp <= 0) return;
+    if (this.stepped === f.tick) return;
+    this.stepped = f.tick;
+    if (this.stages && !this.won && this.stageDone()) {
+      if (this.stageIndex < this.stages.length - 1) this.enterStage(this.stageIndex + 1);
+      else {
+        this.won = true;
+        return;
+      }
+    }
+    if (this.phase < 0) {
+      // a stage's clock starts with its first phase (the first stage's at the pull, not during the countdown)
+      this.stageStart = f.tick;
+      this.enter(0);
+    }
+    // a twin that must fall with the other: once one is down, nothing else happens until the other follows
+    const half = this.halfDown();
+    if (this.foe.hp <= 0 && !half) return;
     // the enrage cast runs over whatever else is going on
-    const enrageStart = f.enrageTicks - sec(this.script.enrage.cast);
-    if (!this.enraging && f.fightTicks >= enrageStart) {
+    if (!this.enraging && this.enrageLeft() <= sec(this.script.enrage.cast)) {
       this.enraging = true;
       this.cancel();
-      this.castBar(this.foe, this.script.enrage.name, sec(this.script.enrage.cast), 'enrage');
+      const caster = this.foe.hp > 0 ? this.foe : (this.twin ?? this.foe);
+      this.castBar(caster, this.script.enrage.name, Math.max(1, this.enrageLeft()), 'enrage');
     }
-    if (!this.enraging) {
+    if (!this.enraging && !half) {
       this.twinRules();
       this.checkPhase();
       this.timeline();
     }
+    this.togetherRule();
     this.track();
     this.resolve();
     this.pools();
     this.addsStep();
+    this.marks();
+  }
+
+  /** One of two bosses that must fall together is down and the other is not (yet). */
+  private halfDown(): boolean {
+    const tw = this.twin;
+    if (!tw || this.script.twin?.together === undefined) return false;
+    return (this.foe.hp <= 0) !== (tw.hp <= 0);
+  }
+
+  /** Two bosses that must fall together: the one left standing too long wipes the party. */
+  private togetherRule(): void {
+    const f = this.fight;
+    const rules = this.script.twin;
+    if (!rules || rules.together === undefined || !this.twin) return;
+    if (!this.halfDown()) {
+      this.oneDownAt = 0;
+      return;
+    }
+    if (!this.oneDownAt) {
+      this.oneDownAt = f.tick;
+      this.cancel();
+      const left = this.foe.hp > 0 ? this.foe : this.twin;
+      this.castBar(left, '同歸於盡', sec(rules.together), 'enrage');
+      f.emit({ k: 'boss', i: left.id, n: '同歸於盡', m: 'raidwide' });
+      return;
+    }
+    if (f.tick - this.oneDownAt >= sec(rules.together)) {
+      const left = this.foe.hp > 0 ? this.foe : this.twin;
+      this.oneDownAt = f.tick + sec(9999);
+      f.emit({ k: 'boss', i: left.id, n: '同歸於盡', m: 'raidwide' });
+      f.hitName = '同歸於盡';
+      for (const q of f.living()) f.hurt(q, 999_999, left);
+      f.hitName = null;
+    }
   }
 
   private enter(k: number): void {
@@ -466,6 +734,15 @@ export class BossBrain {
     const f = this.fight;
     const t0 = f.tick;
     const t1 = t0 + sec(e.cast);
+    // a choice with its own cast names (合掌 / 握拳) is made now, so the cast bar can tell
+    let name = e.name;
+    const mechs = e.mechs.map((m) => {
+      if (m.k !== 'either' || !m.names) return m;
+      const k = Math.floor(f.random() * m.of.length);
+      name = m.names[k] ?? name;
+      return m.of[k]!;
+    });
+    e = { ...e, name, mechs };
     const kinds = e.mechs.map((m) => m.k);
     const m: NonNullable<Foe['cast']>['m'] = kinds.includes('raidwide') ? 'raidwide' : kinds.includes('buster') ? 'buster' : 'mech';
     const buster = e.mechs.find((x) => x.k === 'buster');
@@ -474,7 +751,7 @@ export class BossBrain {
       const casters = e.by === 'both' ? [this.foe, this.twin] : e.by === 'twin' ? [this.twin] : [this.foe];
       for (const c of casters) if (c && !c.gone) this.castBar(c, e.name, t1 - t0, m, c === this.foe ? (top?.id ?? null) : null);
     }
-    const group: Group = { name: e.name, left: 0, failed: false, scored: false };
+    const group: Group = { name, left: 0, failed: false, scored: false };
     const jump = e.mechs.find((x) => x.k === 'jump' && x.to && x.src !== 'twin');
     this.landTo = jump && jump.k === 'jump' && jump.to ? clampToArena(f.enc.arena, jump.to[0], jump.to[1], this.foe.r) : null;
     this.memoAt = e.memo ? t0 + sec(e.memo) : null;
@@ -545,7 +822,7 @@ export class BossBrain {
         const hits = f.roles.tank ? (m.hits ?? 1) : 1;
         const target = m.rank && m.rank > 1 ? this.ranked()[m.rank - 1]?.id : top?.id;
         if (m.rank && m.rank > 1 && !target) return;
-        this.add(t1, g, () => this.busterHit(target, m.dmg, hits > 1, gap, g.name, boss), { shape: { k: 'mark' }, color: 'r', on: target, start: t0 });
+        this.add(t1, g, () => this.busterHit(target, m.dmg, hits > 1, gap, g.name, boss, m.soak), { shape: { k: 'mark' }, color: 'r', on: target, start: t0 });
         for (let k = 1; k < hits; k++) {
           // the next hit goes to whoever is top then: the other tank should have taken the boss
           this.add(t1 + gap * k, g, () => this.busterHit(undefined, m.dmg, k < hits - 1, gap, g.name, boss), {
@@ -575,6 +852,14 @@ export class BossBrain {
       }
       case 'cone': {
         g.scored = true;
+        if (m.top) {
+          // 噴焰: at the top of the enmity list as the cast begins, turning after them: the tank points it away
+          const q = f.topOf(boss) ?? f.living()[0];
+          if (!q) return;
+          const shape: Shape = { k: 'cone', x: boss.x, z: boss.z, f: faceTowards(boss.x, boss.z, q.x, q.z), r: size * 2, deg: m.deg };
+          this.add(t1, g, () => this.aimedHit(shape, q.id, m.dmg, g, boss), { shape, color: 'o', aim: q.id, from: boss.id, start: t0, shown: this.shown('cone') });
+          return;
+        }
         boss.lockUntil = t1; // it stops turning: the fan points where it faced when the cast began
         const shape: Shape = { k: 'cone', x: boss.x, z: boss.z, f: boss.f, r: size * 2, deg: m.deg };
         this.add(t1, g, () => this.areaHit(shape, m.dmg, g, boss), { shape, color: 'o', start: this.teleStart(t1, t0), shown: this.shown('cone') });
@@ -745,13 +1030,21 @@ export class BossBrain {
             () => {
               const ins = f.living().filter((q) => inside(shape, q.x, q.z));
               for (const q of ins) f.hurt(q, m.dmg, boss);
+              if (m.exact && ins.length > need) {
+                // 點數環: one too many and the ring takes everyone in it
+                for (const q of ins) {
+                  this.miss(q, g);
+                  f.hurt(q, 999_999, boss);
+                }
+                return;
+              }
               if (ins.length >= need) return;
               // a short tower blows up on everyone
               g.failed = true;
               this.bossEvent('raidwide', g.name, undefined, boss);
               for (const q of f.living()) f.hurt(q, m.fail, boss);
             },
-            { shape, color: 'y', start: t0, text: String(need) },
+            { shape, color: 'y', start: t0, text: m.exact ? `正好 ${need}` : String(need) },
           );
         }
         return;
@@ -809,7 +1102,7 @@ export class BossBrain {
               else f.hurt(q, m.dmg, boss);
             }
             this.bossEvent('raidwide', g.name, undefined, boss);
-            if (m.shatter) for (const k of used) f.pillarsBroken[k] = true;
+            if (m.shatter) for (const k of used) if (k < 1000) f.pillarsBroken[k] = true;
           },
           { shape, color: 's', start: this.teleStart(t1, t0), shown: this.shown('los') },
         );
@@ -855,6 +1148,14 @@ export class BossBrain {
             start: m.delay ? Math.max(t1, this.teleStart(at, t0)) : this.teleStart(at, t0),
             shown: this.shown('protean'),
           });
+          // 擴散波: the same fans again where they went, unmarked: step out of your own
+          const again = m.again;
+          if (again) {
+            this.add(at, g, () => {
+              const copy: Shape = { ...shape };
+              this.add(f.tick + sec(again), g, () => this.areaHit(copy, m.dmg, g, boss), { shape: copy, color: 'o', start: f.tick, shown: false });
+            });
+          }
         }
         return;
       }
@@ -1109,6 +1410,206 @@ export class BossBrain {
         }
         return;
       }
+      case 'balance':
+        g.scored = true;
+        this.add(t1, g, () => {
+          const tw = this.twin;
+          if (!tw || tw.gone || tw.hp <= 0 || this.foe.hp <= 0) return;
+          if (Math.abs(this.foe.hp / this.foe.maxHp - tw.hp / tw.maxHp) <= m.gap) return;
+          g.failed = true;
+          this.bossEvent('raidwide', g.name, undefined, boss);
+          for (const q of f.living()) f.hurt(q, m.dmg, boss);
+        });
+        return;
+      case 'pose':
+        g.scored = true;
+        this.pose = { near: m.near, dist: m.dist, at: t1 };
+        this.add(
+          t1,
+          g,
+          () => {
+            this.pose = null;
+            const tw = this.twin;
+            if (!tw || tw.gone || tw.hp <= 0) return;
+            const d = Math.hypot(this.foe.x - tw.x, this.foe.z - tw.z) - this.foe.r - tw.r;
+            if (m.near ? d <= m.dist : d >= m.dist) return;
+            g.failed = true;
+            this.bossEvent('raidwide', g.name, undefined, boss);
+            for (const q of f.living()) f.hurt(q, m.dmg, boss);
+          },
+          { shape: { k: 'mark' }, color: m.near ? 'y' : 'w', on: TOP, start: t0, text: m.near ? `核心拖到手邊 ${m.dist} m 內` : `核心拖離手 ${m.dist} m 以上` },
+        );
+        return;
+      case 'quadrants': {
+        g.scored = true;
+        // three quadrants flood (cardinal or intercardinal), one stays dry: the party's new north. Chosen as
+        // the cast begins and shown during it
+        const base = f.random() < 0.5 ? 0 : Math.PI / 4;
+        const dry = Math.floor(f.random() * 4);
+        for (let k = 0; k < 4; k++) {
+          if (k === dry) continue;
+          const a = base + (k * Math.PI) / 2;
+          const [x, z] = [Math.sin(a) * size * 0.55, Math.cos(a) * size * 0.55];
+          const shape: Shape = { k: 'circle', x, z, r: size * 0.42 };
+          this.add(t1, g, () => this.puddle(x, z, { r: size * 0.42, dmg: m.dmg, time: m.time }, g.name, boss), { shape, color: 'p', start: t0 });
+        }
+        return;
+      }
+      case 'throttle':
+        g.scored = true;
+        this.add(t1, g, () => {
+          // DPS first: the healer has the healing to do
+          const pool = [...this.shuffle(f.living().filter((q) => q.role === 'dps')), ...this.shuffle(f.living().filter((q) => q.role === 'healer'))];
+          const check = f.tick + sec(m.time);
+          // `count` for 4 players, more for a bigger party
+          const n = Math.max(1, Math.round((m.count * f.living().length) / 4));
+          for (const q of pool.slice(0, Math.min(n, pool.length))) {
+            // down to half (no lower than they already are)
+            q.hp = Math.max(1, Math.min(q.hp, Math.round(f.maxHp(q) * 0.5)));
+            // it outlives the check by a second (statuses run out before the boss steps); healed to full, it goes at once
+            f.addStatus(q, { id: 'throttle', src: boss.id, until: check + sec(1), v: 0 }, false);
+            const id = q.id;
+            this.add(
+              check,
+              g,
+              () => {
+                const h = f.players.get(id);
+                if (!h || h.dead || !h.statuses.some((x) => x.id === 'throttle')) return;
+                h.statuses = h.statuses.filter((x) => x.id !== 'throttle');
+                this.miss(h, g);
+                f.kill(h);
+              },
+              { shape: { k: 'mark' }, color: 'r', on: id, start: f.tick, text: '補滿血' },
+            );
+          }
+        });
+        return;
+      case 'embolus': {
+        g.scored = true;
+        const [tx, tz] = [boss.x, boss.z];
+        let last_ = t1;
+        for (let k = 0; k < m.count; k++) {
+          const a = f.random() * Math.PI * 2;
+          const [sx, sz] = clampToArena(f.enc.arena, Math.sin(a) * size, Math.cos(a) * size, m.r);
+          const n = Math.max(1, Math.ceil(Math.hypot(tx - sx, tz - sz) / m.step));
+          for (let j = 1; j <= n; j++) {
+            const shape: Shape = { k: 'circle', x: sx + ((tx - sx) * j) / n, z: sz + ((tz - sz) * j) / n, r: m.r };
+            const at = t1 + sec(m.gap) * (j - 1);
+            const last = j === n;
+            if (last) last_ = Math.max(last_, at);
+            this.add(
+              at,
+              g,
+              () => {
+                this.areaHit(shape, m.dmg, g, boss);
+                // the orb reaching the boss where it stood: everyone pays (drag it away)
+                const b = this.foe;
+                if (last && b.hp > 0 && Math.hypot(b.x - shape.x, b.z - shape.z) <= m.r + b.r) {
+                  g.failed = true;
+                  this.bossEvent('raidwide', g.name, undefined, boss);
+                  for (const q of f.living()) f.hurt(q, 999_999, boss);
+                }
+              },
+              { shape, color: 'o', start: Math.max(t0, at - sec(1.5)) },
+            );
+          }
+        }
+        this.avoid = { x: tx, z: tz, r: m.r + boss.r + 3, until: last_ };
+        return;
+      }
+      case 'rotor': {
+        g.scored = true;
+        const a0 = Math.floor(f.random() * 8) * (Math.PI / 4);
+        for (let k = 0; k < m.steps; k++) {
+          const at = t1 + sec(m.gap) * k;
+          for (const off of [0, Math.PI]) {
+            const a = a0 + off - k * m.turn * DEG;
+            const shape: Shape = { k: 'circle', x: Math.sin(a) * m.dist, z: Math.cos(a) * m.dist, r: m.r };
+            this.add(at, g, () => this.areaHit(shape, m.dmg, g, boss), { shape, color: 'o', start: Math.max(t0, at - sec(m.tele)) });
+          }
+        }
+        return;
+      }
+      case 'nisi':
+        g.scored = true;
+        this.add(t1, g, () => {
+          const living = f.living();
+          // the marks go to DPS first, the judgements to two others
+          const holders = [...this.shuffle(living.filter((q) => q.role === 'dps')), ...this.shuffle(living.filter((q) => q.role !== 'dps'))].slice(0, 2);
+          const rest = this.shuffle(living.filter((q) => !holders.includes(q)));
+          const judged = rest.length >= 2 ? rest.slice(0, 2) : holders;
+          // the marks outlive 宣判 by a second (statuses run out before the boss steps); 宣判 takes them off
+          const check = f.tick + sec(m.check);
+          const until = check + sec(1);
+          holders.forEach((q, k) => f.addStatus(q, { id: k ? 'nisiB' : 'nisiA', src: boss.id, until, v: m.dot }, false));
+          judged.forEach((q, k) => f.addStatus(q, { id: k ? 'decreeB' : 'decreeA', src: boss.id, until, v: 0 }, false));
+          this.nisiUntil = check;
+          this.add(check, g, () => this.gavel(g, boss));
+        });
+        return;
+      case 'compressed':
+        g.scored = true;
+        this.add(t1, g, () => {
+          const living = f.living();
+          const water = this.shuffle(living.filter((q) => q.role === 'healer'))[0] ?? this.shuffle(living.filter((q) => q.role !== 'tank'))[0];
+          const bolt = this.shuffle(living.filter((q) => q.role === 'dps' && q !== water))[0] ?? this.shuffle(living.filter((q) => q !== water))[0];
+          const until = f.tick + sec(m.gap * m.rounds * 2 + 1);
+          if (water) f.addStatus(water, { id: 'water', src: boss.id, until, v: 0 }, false);
+          if (bolt) f.addStatus(bolt, { id: 'bolt', src: boss.id, until, v: 0 }, false);
+          this.compressRound(true, m.rounds * 2, m, g, boss, until);
+        });
+        return;
+      case 'superjump': {
+        g.scored = true;
+        // the furthest player as it takes off (the last second of the cast) gets the landing
+        this.add(Math.max(t0, t1 - sec(1.5)), g, () => {
+          const far = [...f.living()].sort((a, b) => Math.hypot(b.x - boss.x, b.z - boss.z) - Math.hypot(a.x - boss.x, a.z - boss.z))[0];
+          if (!far) return;
+          const [x, z] = clampToArena(f.enc.arena, far.x, far.z, boss.r);
+          f.leapFoe(boss, x, z, sec(1));
+          this.bossEvent('jump', g.name, far.id, boss);
+          const land: Shape = { k: 'circle', x, z, r: m.r };
+          this.add(f.tick + sec(1), g, () => this.aimedHit(land, far.id, m.dmg, g, boss), { shape: land, color: 'o', start: f.tick });
+          // 啟示光線: then a wide beam from where it landed through the middle, shown 3 s ahead, lingering
+          const fb = Math.hypot(x, z) > 0.5 ? faceTowards(x, z, 0, 0) : boss.f;
+          const beam: Shape = { k: 'rect', x, z, f: fb, len: this.reachEdge(x, z, fb), w: m.beam.w };
+          this.add(f.tick + sec(3), g, () => this.zone(beam, 999_999, m.beam.time, '啟示光線', 0), { shape: beam, color: 'o', start: f.tick });
+        });
+        return;
+      }
+      case 'iceblock':
+        this.add(t1, g, () => {
+          const a = f.random() * Math.PI * 2;
+          const b = f.spawnFoe('iceblock', Math.sin(a) * size * 0.35, Math.cos(a) * size * 0.35, 1, {});
+          b.untargetable = true;
+          b.aloof = true;
+          this.blocks.push(b);
+          this.add(f.tick + sec(m.time), g, () => {
+            f.despawn(b);
+            this.blocks = this.blocks.filter((x) => x !== b);
+          });
+        });
+        return;
+      case 'plasma':
+        g.scored = true;
+        this.add(t1, g, () => {
+          if (boss.hp <= 0 || boss.gone) return;
+          // it turns to face the middle and holds still behind its shield
+          boss.f = faceTowards(boss.x, boss.z, 0, 0);
+          boss.lockUntil = f.tick + sec(m.time);
+          boss.statuses = boss.statuses.filter((x) => x.id !== 'plasma');
+          // it outlives the check by a second (statuses run out before the boss steps); the check takes it off
+          boss.statuses.push({ id: 'plasma', src: boss.id, until: f.tick + sec(m.time + 1), v: Math.round(m.hp * f.hpScale) });
+          // the cast bar and the shield on its HP bar say it all
+          this.add(f.tick + sec(m.time), g, () => {
+            if (!boss.statuses.some((x) => x.id === 'plasma') || boss.hp <= 0) return;
+            boss.statuses = boss.statuses.filter((x) => x.id !== 'plasma');
+            g.failed = true;
+            this.bossEvent('raidwide', g.name, undefined, boss);
+            for (const q of f.living()) f.hurt(q, m.dmg, boss);
+          });
+        });
+        return;
       case 'later':
         this.schedule(m.mech, t0, t1 + sec(m.after), g, top);
         return;
@@ -1171,9 +1672,118 @@ export class BossBrain {
   }
 
   /** The arena's pillars still standing, with their index. */
+  /** 宣判: whoever was told to hold α (β) must hold it now, or the whole party goes down; the marks go. */
+  private gavel(g: Group, src: Foe): void {
+    const f = this.fight;
+    const wrong = f.living().some(
+      (q) =>
+        (q.statuses.some((x) => x.id === 'decreeA') && !q.statuses.some((x) => x.id === 'nisiA')) ||
+        (q.statuses.some((x) => x.id === 'decreeB') && !q.statuses.some((x) => x.id === 'nisiB')),
+    );
+    for (const q of f.players.values()) q.statuses = q.statuses.filter((x) => !['nisiA', 'nisiB', 'decreeA', 'decreeB', 'nisiCd'].includes(x.id));
+    this.nisiUntil = 0;
+    if (!wrong) return;
+    g.failed = true;
+    this.bossEvent('raidwide', g.name, undefined, src);
+    for (const q of f.living()) f.hurt(q, 999_999, src);
+  }
+
+  /**
+   * Every tick: 窒息 goes from whoever has been healed to full; 判決傳遞 while it runs: a mark passes to the
+   * first player its holder touches who holds none (and has not just passed one on); α touching β takes both down.
+   */
+  private marks(): void {
+    const f = this.fight;
+    for (const q of f.living()) {
+      if (q.hp >= f.maxHp(q) - 1 && q.statuses.some((x) => x.id === 'throttle')) q.statuses = q.statuses.filter((x) => x.id !== 'throttle');
+    }
+    if (f.tick >= this.nisiUntil) return;
+    const living = f.living();
+    const markOf = (q: Fighter) => q.statuses.find((x) => x.id === 'nisiA' || x.id === 'nisiB');
+    for (const a of living) {
+      const ma = markOf(a);
+      if (!ma || a.dead) continue;
+      for (const b of living) {
+        if (a === b || b.dead || Math.hypot(a.x - b.x, a.z - b.z) > CONTACT) continue;
+        const mb = markOf(b);
+        if (mb && mb.id !== ma.id) {
+          f.emit({ k: 'boss', i: this.foe.id, n: '判決衝突', m: 'raidwide' });
+          f.hitName = '判決衝突';
+          f.kill(a);
+          f.kill(b);
+          f.hitName = null;
+          break;
+        }
+        // someone just raised (where they fell) cannot help where they stand: it does not pass to them
+        if (mb || b.statuses.some((x) => x.id === 'nisiCd' || x.id === 'risen')) continue;
+        a.statuses = a.statuses.filter((x) => x !== ma);
+        f.addStatus(b, { id: ma.id, src: ma.src, until: ma.until, v: ma.v }, false);
+        f.addStatus(a, { id: 'nisiCd', src: ma.src, until: f.tick + sec(10), v: 0 }, false);
+        break;
+      }
+    }
+  }
+
+  /**
+   * One round of 壓縮水 (water: a stack for 3 or more) or 壓縮雷 (bolt: exactly 2), on whoever holds it now;
+   * then it passes to someone else in the stack who has not held it and does not hold the other one,
+   * and the next round (the other element) is scheduled.
+   */
+  private compressRound(water: boolean, left: number, m: Extract<MechDef, { k: 'compressed' }>, g: Group, src: Foe, until: number): void {
+    const f = this.fight;
+    if (left <= 0) return;
+    const id = water ? 'water' : 'bolt';
+    const holder = f.living().find((q) => q.statuses.some((x) => x.id === id));
+    const at = f.tick + sec(m.gap);
+    if (!holder) {
+      this.add(at, g, () => this.compressRound(!water, left - 1, m, g, src, until));
+      return;
+    }
+    const r = water ? 4 : 3;
+    const want = water ? Math.min(3, f.living().length) : 2;
+    this.add(
+      at,
+      g,
+      () => {
+        const h = f.players.get(holder.id);
+        if (h && !h.dead && h.statuses.some((x) => x.id === id)) {
+          const ins = f.living().filter((q) => Math.hypot(q.x - h.x, q.z - h.z) <= r);
+          this.stackHit(h.id, r, m.dmg, want, g, src, !water);
+          // it moves on: the nearest in the stack who has not held this one and does not hold the other
+          const down = water ? 'waterDown' : 'boltDown';
+          const other = water ? 'bolt' : 'water';
+          // nobody who can take it in the stack: it jumps to the nearest who can, wherever they stand
+          const can = (q: Fighter) => q !== h && !q.statuses.some((x) => x.id === down || x.id === other);
+          const near = (a: Fighter, b: Fighter) => Math.hypot(a.x - h.x, a.z - h.z) - Math.hypot(b.x - h.x, b.z - h.z);
+          const next = ins.filter(can).sort(near)[0] ?? f.living().filter(can).sort(near)[0];
+          h.statuses = h.statuses.filter((x) => x.id !== id);
+          f.addStatus(h, { id: down, src: src.id, until, v: 0 }, false);
+          if (next && left > 2) f.addStatus(next, { id, src: src.id, until, v: 0 }, false);
+        }
+        this.compressRound(!water, left - 1, m, g, src, until);
+      },
+      { shape: { k: 'circle', x: 0, z: 0, r }, color: 'y', on: holder.id, start: f.tick, text: String(want), exact: !water, pass: true },
+    );
+  }
+
+  /** A lingering area of any shape (a pool, a beam) that hurts `dmg` a second to whoever stands in it. */
+  private zone(shape: Shape, dmg: number, time: number, name: string, armed = 1): void {
+    const f = this.fight;
+    const tele: Tele = { id: ++this.seq, shape, color: 'r', start: f.tick, end: f.tick + sec(time), shown: true, zone: true };
+    this.puddles.push({ tele, armed: f.tick + sec(armed), group: { name, left: 0, failed: false, scored: true }, dmg, hit: new Map(), missed: new Set() });
+  }
+
   private standing(): { k: number; p: Pillar }[] {
     const f = this.fight;
-    return (f.enc.arena.pillars ?? []).map((p, k) => ({ k, p })).filter(({ k }) => !f.pillarsBroken[k]);
+    const fixed = (f.enc.arena.pillars ?? []).map((p, k) => ({ k, p })).filter(({ k }) => !f.pillarsBroken[k]);
+    // ice blocks (冰塊) hide players too; they never shatter (k past the arena's pillars)
+    const ice = this.blocks.filter((b) => !b.gone).map((b, j) => ({ k: 1000 + j, p: { x: b.x, z: b.z, r: b.r } }));
+    return [...fixed, ...ice];
+  }
+
+  /** Ice blocks standing now (冰塊), for the line-of-sight telegraphs. */
+  get extraPillars(): Pillar[] {
+    return this.blocks.filter((b) => !b.gone).map((b) => ({ x: b.x, z: b.z, r: b.r }));
   }
 
   private bossEvent(m: Extract<FightEvent, { k: 'boss' }>['m'], n: string, t?: string, src: Foe = this.foe): void {
@@ -1191,11 +1801,21 @@ export class BossBrain {
 
   // ------------------------------------------------------------------ resolving
 
-  private busterHit(target: string | undefined, dmg: number, crack: boolean, gap: number, name: string, src: Foe): void {
+  private busterHit(target: string | undefined, dmg: number, crack: boolean, gap: number, name: string, src: Foe, soak?: number): void {
     const f = this.fight;
     const q = target ? f.players.get(target) : (f.topOf(this.foe) ?? undefined);
     if (!q || q.dead) return;
     this.bossEvent('buster', name, q.id, src);
+    if (soak) {
+      // 流體揮擊: a second one inside 水抗降低 takes everything; only an invulnerability (or 死戰) keeps them up
+      const soaked = q.statuses.some((x) => x.id === 'waterDown');
+      f.hurt(q, soaked ? 999_999 : dmg * (q.role === 'tank' ? 1 : RULES.noTankDamage), src);
+      if (!q.dead) {
+        q.statuses = q.statuses.filter((x) => x.id !== 'waterDown');
+        f.addStatus(q, { id: 'waterDown', src: src.id, until: f.tick + sec(soak), v: 0 }, false);
+      }
+      return;
+    }
     // a tank buster on someone who is not a tank (no tank in the party, or the second of the list) hits half
     f.hurt(q, dmg * (q.role === 'tank' ? 1 : RULES.noTankDamage), src);
     if (crack && !q.dead) {
@@ -1349,8 +1969,18 @@ export class BossBrain {
     this.adds = m.at.map(([x, z]) => {
       const a = f.spawnFoe(m.kind, x, z, Math.round(m.hp * f.hpScale), { auto: m.auto });
       a.f = faceTowards(x, z, 0, 0);
+      if (m.floor) a.minHp = 1;
       return a;
     });
+    this.feed = m.feed ?? null;
+    if (m.onPlayers) {
+      // each one on a different player (not a tank first), for good: they walk after them
+      const marked = [...this.shuffle(f.living().filter((q) => q.role !== 'tank')), ...this.shuffle(f.living().filter((q) => q.role === 'tank'))];
+      this.adds.forEach((a, k) => {
+        const q = marked[k % Math.max(1, marked.length)];
+        if (q) a.enmity.set(q.id, 1e9);
+      });
+    }
     this.addsDeadline = f.tick + sec(m.time);
     this.addsBoom = m.boom;
     this.together = !!m.together;
@@ -1364,7 +1994,8 @@ export class BossBrain {
       const order = f.hard ? this.shuffle(this.adds) : this.adds;
       order.forEach((a, k) => this.addNext.set(a.id, f.tick + sec(m.attack!.first + (m.attack!.every * k) / order.length)));
     }
-    this.bossEvent('adds', '');
+    // what kind of adds, for the hint the clients show (獵殺人偶 are not to be killed)
+    this.bossEvent('adds', m.feed ? '獵殺人偶' : '');
   }
 
   /** The adds' timer, what they do, and the Hard rule that they fall together. */
@@ -1373,6 +2004,20 @@ export class BossBrain {
     if (!this.adds.length) return;
     const alive = this.adds.filter((a) => a.hp > 0 && !a.gone);
     if (!alive.length) return;
+    // 獵殺人偶: walked into the boss (or its twin) low enough, it is absorbed; too healthy, it overloads
+    if (this.feed) {
+      for (const a of alive) {
+        const into = [this.foe, this.twin].find((b) => b && !b.gone && b.hp > 0 && Math.hypot(b.x - a.x, b.z - a.z) <= b.r + a.r);
+        if (!into) continue;
+        const ok = a.hp / a.maxHp <= this.feed.pct;
+        f.emit({ k: 'boss', i: into.id, n: ok ? '回收' : '過載', m: 'raidwide' });
+        f.hitName = ok ? '回收' : '過載';
+        for (const q of f.living()) f.hurt(q, ok ? this.feed.dmg : this.feed.fail, into);
+        f.hitName = null;
+        a.hp = 0;
+        f.despawn(a);
+      }
+    }
     if (f.tick >= this.addsDeadline) {
       for (const a of alive) {
         this.fight.emit({ k: 'boss', i: a.id, n: '自爆', m: 'raidwide' });
@@ -1408,6 +2053,31 @@ export class BossBrain {
     this.addNext.set(a.id, f.tick + sec(atk.every * Math.max(1, 4 / Math.max(1, f.living().length))));
     const size = f.enc.arena.size;
     const hit = f.tick + sec(atk.k === 'cone' ? this.script.tele : 3);
+    if (atk.k === 'exhaust') {
+      // it stops to charge a burst around itself: hit a second time within 20 s (以太) is down
+      const g: Group = { name: '排氣', left: 0, failed: false, scored: true };
+      a.lockUntil = hit;
+      a.cast = { name: '排氣', m: 'mech', start: f.tick, end: hit, target: null };
+      const shape: Shape = { k: 'circle', x: a.x, z: a.z, r: atk.r };
+      this.add(
+        hit,
+        g,
+        () => {
+          if (a.hp <= 0 || a.gone) return;
+          for (const q of f.living()) {
+            if (!inside(shape, q.x, q.z)) continue;
+            this.miss(q, g);
+            if (q.statuses.some((x) => x.id === 'aether')) f.kill(q);
+            else {
+              f.hurt(q, atk.dmg, a);
+              f.addStatus(q, { id: 'aether', src: a.id, until: f.tick + sec(20), v: 0 }, false);
+            }
+          }
+        },
+        { shape, color: 'o', start: f.tick },
+      );
+      return;
+    }
     if (atk.k === 'cone') {
       const g: Group = { name: `${a.name}光束`, left: 0, failed: false, scored: true };
       const shape: Shape = { k: 'cone', x: a.x, z: a.z, f: a.f, r: atk.r, deg: atk.deg };
@@ -1473,7 +2143,7 @@ export class BossBrain {
     const a = this.foe;
     const since = f.tick - this.phaseStart;
     // 共鳴: too close when checked, both power up
-    if (since > 0 && since % sec(rules.resonance.every) === 0 && Math.hypot(a.x - tw.x, a.z - tw.z) < rules.resonance.dist) {
+    if (rules.resonance && since > 0 && since % sec(rules.resonance.every) === 0 && Math.hypot(a.x - tw.x, a.z - tw.z) < rules.resonance.dist) {
       for (const e of [a, tw]) {
         const old = e.statuses.find((s) => s.id === 'resonance');
         if (old) old.v++;
@@ -1483,18 +2153,18 @@ export class BossBrain {
     }
     // 失衡: one much healthier than the other
     const gap = Math.abs(a.hp / a.maxHp - tw.hp / tw.maxHp);
-    if (since > 0 && since % sec(rules.imbalance.every) === 0 && gap > rules.imbalance.gap) {
+    if (rules.imbalance && since > 0 && since % sec(rules.imbalance.every) === 0 && gap > rules.imbalance.gap) {
       const src = a.hp / a.maxHp > tw.hp / tw.maxHp ? a : tw;
       f.emit({ k: 'boss', i: src.id, n: '失衡', m: 'raidwide' });
       f.hitName = '失衡';
-      for (const q of f.living()) f.hurt(q, rules.imbalance.dmg, src);
+      for (const q of f.living()) f.hurt(q, rules.imbalance!.dmg, src);
       f.hitName = null;
     }
     // the first one down to the threshold waits, unhurt; both there: they merge
     for (const e of [a, tw]) {
       if (e.minHp !== undefined && e.hp <= e.minHp && !e.statuses.some((s) => s.id === 'sealed')) e.statuses.push({ id: 'sealed', src: e.id, until: -1, v: 0 });
     }
-    if (a.minHp !== undefined && tw.minHp !== undefined && a.hp <= a.minHp && tw.hp <= tw.minHp) this.fuse(rules);
+    if (rules.fuse && a.minHp !== undefined && tw.minHp !== undefined && a.hp <= a.minHp && tw.hp <= tw.minHp) this.fuse(rules);
   }
 
   private fuse(rules: Twin): void {
@@ -1507,7 +2177,7 @@ export class BossBrain {
     tw.minHp = undefined;
     f.despawn(a);
     f.despawn(tw);
-    const merged = f.spawnFoe(rules.fuse.kind, x, z, hp, { id: 'fused', auto: this.script.auto });
+    const merged = f.spawnFoe(rules.fuse!.kind, x, z, hp, { id: 'fused', auto: this.script.auto });
     for (const [id, v] of a.enmity) merged.enmity.set(id, v);
     this.foe = merged;
     this.twin = null;
@@ -1522,6 +2192,12 @@ export class BossBrain {
     this.fight.fail(q, g.name);
   }
 }
+
+/** What a stage of the ultimate leaves on players goes when the next one starts. */
+const STAGE_MARKS = new Set(['throttle', 'aether', 'nisiA', 'nisiB', 'decreeA', 'decreeB', 'nisiCd', 'water', 'bolt', 'waterDown', 'boltDown']);
+
+/** Within this distance (metres) two players touch, and a judgement mark passes on (判決傳遞). */
+export const CONTACT = 1;
 
 /** Statuses that hold a player in place (a prison, a freeze): no knockback moves them. */
 const STATUS_STUN = new Set(['stun', 'frozen']);

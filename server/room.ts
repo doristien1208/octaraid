@@ -1,7 +1,7 @@
 import { MAX_PLAYERS, RULES, TICK_MS } from '../shared/constants';
 import { VOTE_OPTIONS, clock, encounterById, optionLabel } from '../shared/encounters';
 import { DEFAULT_JOB_ORDER, ROLE_NAMES, jobById, type JobId } from '../shared/jobs';
-import { ROLE_CAPS, hpScale, roleHasRoom } from '../shared/party';
+import { ROLE_CAPS, ULTIMATE_NEEDS, hpScale, optionOpen, roleHasRoom } from '../shared/party';
 import {
   END_NAMES,
   type C2S,
@@ -183,9 +183,11 @@ export class Room {
     const fail = (msg: string) => m.s.send(errorMsg('start', msg));
     if (this.members.some((x) => x !== m && !x.ready)) return fail('還有人沒按準備');
     if (this.members.some((x) => !x.s.online)) return fail('有玩家斷線中');
+    const jobs = this.members.map((x) => x.job);
     const result = tally(
       this.members.map((x) => x.vote),
       Math.random,
+      (k) => optionOpen(k, jobs),
     );
     this.lastTally = result;
     this.phase = 'tally';
@@ -200,6 +202,12 @@ export class Room {
     if (this.phase !== 'tally' || !this.lastTally) return;
     const opt = VOTE_OPTIONS[this.lastTally.winner]!;
     const jobs = this.members.map((x) => x.job);
+    // 直接重來 after someone left: the ultimate may no longer be open to this party
+    if (!optionOpen(opt.index, jobs)) {
+      this.system(`${optionLabel(opt.index)}需要${ULTIMATE_NEEDS}：請重新投票`);
+      this.backToWaiting();
+      return;
+    }
     const info: GameStartInfo = {
       enc: opt.enc,
       hard: opt.hard,

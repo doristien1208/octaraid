@@ -3,7 +3,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RULES, TICK_MS, TICK_RATE } from '../../shared/constants';
 import { encounterById, type Encounter } from '../../shared/encounters';
 import { LB_SLOT, LIMIT_BREAKS, SPRINT_SLOT, jobById, skillAt, type Fx, type Job, type SkillInfo } from '../../shared/jobs';
-import { FOES } from '../../shared/bosses/foes';
+import { FOES, type FoeKind } from '../../shared/bosses/foes';
 import { DENY_TEXT, type C2S, type DenyReason, type FightEvent, type GameResult, type GameStartInfo, type SnapFoe, type SnapPlayer, type Snapshot } from '../../shared/protocol';
 import { angleDiff, clampToArena, faceTowards, reach } from '../../shared/sim/arena';
 import { STATUS, STATUS_IDS } from '../../shared/status';
@@ -23,6 +23,9 @@ import { Hud, type ResultAction, type SlotState } from './hud';
 import { JUMP } from './look';
 import { Playback } from './playback';
 import { Telegraphs } from './telegraphs';
+
+/** The puff an enemy appears in: rock dust by default, frost for ice, quicksilver for 水銀之手, brass for the dolls. */
+const SPAWN_DUST: Partial<Record<FoeKind, string>> = { prison: '#e8c48a', iceblock: '#cfefff', hand: '#d8e4ee', liquid: '#d8e4ee', doll: '#e0b070' };
 
 /** Where the view sends its messages: the server, or the in-browser fight of the practice mode. */
 export interface GameLink {
@@ -210,7 +213,7 @@ export class GameView {
     for (const e of s.e) {
       if (!this.foes.has(e.i)) {
         this.addFoe(e.i, e.kd);
-        if (s.ph === 1) this.effects.burst(e.x, 0.6, e.z, FOES[e.kd].ring + 0.6, e.kd === 'prison' ? '#e8c48a' : '#c8b49a', 0.5);
+        if (s.ph === 1) this.effects.burst(e.x, 0.6, e.z, FOES[e.kd].ring + 0.6, SPAWN_DUST[e.kd] ?? '#c8b49a', 0.5);
       }
       const f = this.foes.get(e.i)!;
       f.view.setState(e.u === 1, e.g === 1);
@@ -517,7 +520,12 @@ export class GameView {
         }
         break;
       case 'adds':
-        this.hud.addChat('', '小怪出現了：坦克接住，其他人集火');
+        this.hud.addChat(
+          '',
+          e.n === '獵殺人偶'
+            ? '獵殺人偶出現了：被盯上的人帶著它遠離王，大家把它打到 25% 以下，再帶進核心或手的圈裡回收（血太多就帶進去會滅團）'
+            : '小怪出現了：坦克接住，其他人集火',
+        );
         break;
       case 'revive':
         this.effects.pillar(b.x, b.z, '#ff7a2c', 1.2, 0.8);

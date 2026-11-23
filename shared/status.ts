@@ -65,7 +65,20 @@ export type StatusId =
   | 'flameSpirit'
   | 'radiance'
   | 'spiritShield'
-  | 'starDragon';
+  | 'starDragon'
+  // 時律機神殿 (v0.7)
+  | 'throttle'
+  | 'aether'
+  | 'nisiA'
+  | 'nisiB'
+  | 'decreeA'
+  | 'decreeB'
+  | 'nisiCd'
+  | 'water'
+  | 'bolt'
+  | 'waterDown'
+  | 'boltDown'
+  | 'plasma';
 
 export interface StatusInfo {
   name: string;
@@ -196,6 +209,19 @@ export const STATUS: Readonly<Record<StatusId, StatusInfo>> = {
   radiance: { name: '靈光閃耀', icon: '耀', good: true, desc: '傷害 +5%', dmg: 0.05 },
   spiritShield: { name: '靈盾', icon: '盾', good: true, desc: '吸收傷害的護盾', shield: true },
   starDragon: { name: '星龍降臨', icon: '龍', good: true, desc: '星龍在身邊作戰：每 3 秒吐息，最後星龍焰' },
+  // 時律機神殿 (v0.7)
+  throttle: { name: '窒息', icon: '窒', good: false, desc: '時間到之前要被補到滿血，否則倒地' },
+  aether: { name: '以太', icon: '以', good: false, desc: '被人偶的排氣打到：再被打到一次就倒地' },
+  nisiA: { name: '判決印 α', icon: 'α', good: false, desc: '碰到別人就傳過去；碰到拿著 β 的人，兩人都倒地；每秒受到傷害', dot: true },
+  nisiB: { name: '判決印 β', icon: 'β', good: false, desc: '碰到別人就傳過去；碰到拿著 α 的人，兩人都倒地；每秒受到傷害', dot: true },
+  decreeA: { name: '最終判決 α', icon: 'α', good: true, desc: '宣判時手上要拿著判決印 α' },
+  decreeB: { name: '最終判決 β', icon: 'β', good: true, desc: '宣判時手上要拿著判決印 β' },
+  nisiCd: { name: '判決餘波', icon: '餘', good: false, desc: '剛把判決印傳出去：這段時間拿不到判決印' },
+  water: { name: '壓縮水', icon: '水', good: false, desc: '時間到時至少 3 人一起分攤，之後轉給分攤裡的另一人' },
+  bolt: { name: '壓縮雷', icon: '雷', good: false, desc: '時間到時正好 2 人分攤，之後轉給分攤裡的另一人' },
+  waterDown: { name: '水抗降低', icon: '濕', good: false, desc: '吃過流體揮擊或壓縮水：這段時間再吃流體揮擊就倒地，壓縮水也不會再傳給你' },
+  boltDown: { name: '雷抗降低', icon: '麻', good: false, desc: '已經拿過壓縮雷：不會再傳給你' },
+  plasma: { name: '電漿護盾', icon: '盾', good: true, desc: '只吃正面的攻擊：打破之前其他方向的傷害都無效' },
 };
 
 export const STATUS_IDS = Object.keys(STATUS) as StatusId[];
